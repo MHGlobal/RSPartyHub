@@ -1,0 +1,51 @@
+name: Materialize RS Party Hub Master Spec
+
+on:
+  push:
+    paths:
+      - 'TRIGGER_MATERIALIZE_SPEC'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  materialize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rebuild and split master specification
+        shell: bash
+        run: |
+          python - <<'PY'
+          import base64, hashlib, lzma, pathlib
+
+          payload_dir = pathlib.Path('spec-payload')
+          encoded = ''.join(p.read_text(encoding='ascii') for p in sorted(payload_dir.glob('chunk-*.txt')))
+          raw = lzma.decompress(base64.b64decode(encoded))
+          expected = '8139cef5709ddd659cac127eee319cd3a2ef265230e0c88be3b6f34b7ce0aea2'
+          actual = hashlib.sha256(raw).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'Original SHA-256 mismatch: {actual}')
+
+          lines = raw.decode('utf-8').splitlines(keepends=True)
+          if len(lines) != 31953:
+              raise SystemExit(f'Unexpected line count: {len(lines)}')
+
+          cuts = [0, 8006, 15978, 23982, len(lines)]
+          for i in range(4):
+              name = f'RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_{i+1}_OF_4.md'
+              data = ''.join(lines[cuts[i]:cuts[i+1]]).encode('utf-8')
+              pathlib.Path(name).write_bytes(data)
+              print(name, len(data), hashlib.sha256(data).hexdigest())
+          PY
+
+      - name: Commit four Markdown parts
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_*_OF_4.md
+          git rm -r spec-payload TRIGGER_MATERIALIZE_SPEC
+          git commit -m 'docs: add master spec split into four parts'
+          git push
