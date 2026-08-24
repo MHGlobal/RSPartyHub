@@ -2,6 +2,7 @@ name: Materialize RS Party Hub Master Spec
 
 on:
   push:
+    branches: [main]
     paths:
       - 'TRIGGER_MATERIALIZE_SPEC'
   workflow_dispatch:
@@ -14,14 +15,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Rebuild and split master specification
+        with:
+          ref: main
+
+      - name: Rebuild, verify and split master specification
         shell: bash
         run: |
+          set -euo pipefail
           python - <<'PY'
           import base64, hashlib, lzma, pathlib
 
           payload_dir = pathlib.Path('spec-payload')
-          encoded = ''.join(p.read_text(encoding='ascii') for p in sorted(payload_dir.glob('chunk-*.txt')))
+          chunks = sorted(payload_dir.glob('chunk-*.txt'))
+          if len(chunks) != 13:
+              raise SystemExit(f'Expected 13 payload chunks, found {len(chunks)}')
+          encoded = ''.join(p.read_text(encoding='ascii') for p in chunks)
           raw = lzma.decompress(base64.b64decode(encoded))
           expected = '8139cef5709ddd659cac127eee319cd3a2ef265230e0c88be3b6f34b7ce0aea2'
           actual = hashlib.sha256(raw).hexdigest()
@@ -33,19 +41,38 @@ jobs:
               raise SystemExit(f'Unexpected line count: {len(lines)}')
 
           cuts = [0, 8006, 15978, 23982, len(lines)]
+          expected_parts = [
+              ('6078ff9277ee70528ee66ae4cd20d5c3f1b7cd436cd3feb31e2fcedb9895b069', 393853),
+              ('a4e1d6fd1bb812439a39ae9e8f52bd7625bc0cc02c78a0d3aa8ad00190617861', 431585),
+              ('64732e220ddbe9af2bf10f5318ad4c710aadc7e200bcc138cb3d23e775a93e8f', 302202),
+              ('4f03680361da0e99583133f64cd5b113daa034e07a02f4145da272ecedc93d0b', 438911),
+          ]
           for i in range(4):
               name = f'RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_{i+1}_OF_4.md'
               data = ''.join(lines[cuts[i]:cuts[i+1]]).encode('utf-8')
+              digest = hashlib.sha256(data).hexdigest()
+              exp_sha, exp_size = expected_parts[i]
+              if len(data) != exp_size or digest != exp_sha:
+                  raise SystemExit(f'Part {i+1} verification failed: size={len(data)} sha={digest}')
               pathlib.Path(name).write_bytes(data)
-              print(name, len(data), hashlib.sha256(data).hexdigest())
+              print(name, len(data), digest)
           PY
 
-      - name: Commit four Markdown parts
+      - name: Commit verified four Markdown parts
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_*_OF_4.md
           git rm -r spec-payload TRIGGER_MATERIALIZE_SPEC
-          git commit -m 'docs: add master spec split into four parts'
-          git push
+          git commit -m 'docs: add master spec split into four verified parts'
+          for attempt in 1 2 3 4 5; do
+            git pull --rebase origin main || { git rebase --abort || true; }
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo 'Unable to push after retries' >&2
+          exit 1
