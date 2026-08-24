@@ -1,4 +1,4 @@
-name: Assemble RS Party Hub Master Spec
+name: Assemble RS Party Hub Master Spec (4 parts)
 
 on:
   push:
@@ -16,26 +16,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Assemble, decode, decompress and verify master specification
+      - name: Decode and verify the four specification parts
         shell: bash
         run: |
           set -euo pipefail
-          test -d .spec_chunks
-          test -n "$(find .spec_chunks -maxdepth 1 -type f -name 'part-*' -print -quit)"
-          cat .spec_chunks/part-* > /tmp/rs-party-spec.gz.b64
-          echo "f2b505a3fa84c90541da8d2b2990552a0b9af568a09595d24aa871f020ba8c12  /tmp/rs-party-spec.gz.b64" | sha256sum -c -
-          base64 --decode /tmp/rs-party-spec.gz.b64 > /tmp/rs-party-spec.md.gz
-          echo "86c3cd1fae239f5c38483eaaf26385b8b0a48b9050763aa8f6e555f3bf643c55  /tmp/rs-party-spec.md.gz" | sha256sum -c -
-          gzip -dc /tmp/rs-party-spec.md.gz > RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md
-          echo "8139cef5709ddd659cac127eee319cd3a2ef265230e0c88be3b6f34b7ce0aea2  RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md" | sha256sum -c -
+          decode_part() {
+            n="$1"; b64sha="$2"; gzsha="$3"; mdsha="$4"
+            src=".spec_chunks/part${n}.gz.b64"
+            gz="/tmp/part${n}.md.gz"
+            out="RS_PARTY_HUB_MASTER_SPEC_PART_${n}_OF_4.md"
+            echo "${b64sha}  ${src}" | sha256sum -c -
+            base64 --decode "${src}" > "${gz}"
+            echo "${gzsha}  ${gz}" | sha256sum -c -
+            gzip -dc "${gz}" > "${out}"
+            echo "${mdsha}  ${out}" | sha256sum -c -
+          }
 
-      - name: Commit complete document and remove staging chunks
+          decode_part 1 4526085f1e4a30feeac195dcb77aed190f7938546e5a5215153d6137c9a2f0ac f7f2693efe036e5c3c1fd1f57e6ce7e6394986bd1ba2e6371cddcde608261465 2a34a4ccb5e151ecd97137ce4ae3f8ebc65dd08954d217deba62a76bce6a2e2a
+          decode_part 2 26922b4f95684cee508fe4dea8b8325a0222f2e98dea6e3c4ee1a07cff69a236 7b0a183708e403fe8afe239c95993351f4fdcc9efb4f1a75fd0c6d27dd85f3ac 9e054f3a3b54f02584fa0b574657a7d2d7b06acccfe1cf916a51687e524bf139
+          decode_part 3 67dbd6fda2c0430a98fac7195a1194b52fe2c124cd1b699001bd0de7984968f1 26369ee1b41068f50aea7cd79c6d79c5a1e75a36e73f9e091235ac92b8edeed2 4509c1b305f1000e4030a4430492c79ae5702f118c7314fd5932bc89fdf6d043
+          decode_part 4 cbf1afc7e247c55b141a171fe1d2989e99983b70e4606c8b04a32b50e6bc34f9 784ff2750a0097decea25f56f4cf9caf7dbe9f1b48f6d1e5e309477ecfb0e820 6b93152d38c68ea65d62a85dc8a8123bf096350b6e0626140c057a3f6ab4dc79
+
+      - name: Commit final four-part documentation and clean staging
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md
-          git rm -r .spec_chunks
-          git commit -m "docs: add complete 400+ page RS Party Hub master spec"
+          git add RS_PARTY_HUB_MASTER_SPEC_PART_*_OF_4.md
+          git rm -r .spec_chunks .assemble-ready .github/workflows/assemble-master-spec.yml
+          git commit -m "docs: add RS Party Hub master specification in four parts"
           git push
