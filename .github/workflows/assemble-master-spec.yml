@@ -1,0 +1,37 @@
+name: Assemble RS Party Hub Master Spec
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.assemble-ready'
+
+permissions:
+  contents: write
+
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Assemble and verify master specification
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d .spec_chunks
+          test -n "$(find .spec_chunks -maxdepth 1 -type f -name 'part-*' -print -quit)"
+          cat .spec_chunks/part-* > RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md
+          echo "8139cef5709ddd659cac127eee319cd3a2ef265230e0c88be3b6f34b7ce0aea2  RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md" | sha256sum -c -
+
+      - name: Commit complete document and remove staging chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md
+          git rm -r .spec_chunks
+          git commit -m "docs: add complete 400+ page RS Party Hub master spec"
+          git push
