@@ -16,13 +16,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Assemble and verify master specification
+      - name: Assemble, decode, decompress and verify master specification
         shell: bash
         run: |
           set -euo pipefail
           test -d .spec_chunks
           test -n "$(find .spec_chunks -maxdepth 1 -type f -name 'part-*' -print -quit)"
-          cat .spec_chunks/part-* > RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md
+          cat .spec_chunks/part-* > /tmp/rs-party-spec.gz.b64
+          echo "f2b505a3fa84c90541da8d2b2990552a0b9af568a09595d24aa871f020ba8c12  /tmp/rs-party-spec.gz.b64" | sha256sum -c -
+          base64 --decode /tmp/rs-party-spec.gz.b64 > /tmp/rs-party-spec.md.gz
+          echo "86c3cd1fae239f5c38483eaaf26385b8b0a48b9050763aa8f6e555f3bf643c55  /tmp/rs-party-spec.md.gz" | sha256sum -c -
+          gzip -dc /tmp/rs-party-spec.md.gz > RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md
           echo "8139cef5709ddd659cac127eee319cd3a2ef265230e0c88be3b6f34b7ce0aea2  RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P.md" | sha256sum -c -
 
       - name: Commit complete document and remove staging chunks
