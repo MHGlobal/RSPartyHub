@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Jogar — RS Party Hub</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="banner" id="reconnect-banner">A reconectar…</div>
+  <nav class="topbar">
+    <div class="brand">RS <span>Party Hub</span></div>
+    <div class="conn-badge bad" id="conn-indicator">desligado</div>
+    <button class="btn" style="width:auto;padding:8px 14px;" id="btn-leave">Sair</button>
+  </nav>
+
+  <main class="wrap" id="app">
+    <section class="card center"><h2>A ligar…</h2></section>
+  </main>
+
+  <section class="reactions" id="reactions"></section>
+
+  <script type="module">
+    import {
+      connectAndAuth, onSnapshot, requestSnapshot, syncClock,
+      saveIdentity, loadIdentity, clearIdentity, detectCapabilities, el, h,
+    } from "/js/client.js";
+
+    const REACTIONS = ["👍", "❤️", "😂", "👏", "😮"];
+    const params = new URLSearchParams(location.search);
+    const roomCode = (params.get("room") ?? "").toUpperCase();
+    let snap = null;
+    let offsetMs = 0;
+    let socket = null;
+    const app = el("app");
+
+    function fatal(msg) {
+      app.innerHTML = `<section class="card center"><h2>⚠ ${msg}</h2>
+        <p class="waiting-note"><a href="/" style="color:var(--acc-1)">← Voltar ao início</a></p></section>`;
+    }
+
+    /* ---------- identity setup ---------- */
+
+    function askIdentity() {
+      const nickname = prompt("Como te chamas?", "Jogador" + Math.floor(10 + Math.random() * 90));
+      if (!nickname?.trim()) return null;
+      const icons = ["🐱", "🦊", "🐼", "🐸", "🦄", "🐙", "🐧", "🦁"];
+      const bgs = ["#7c5cff", "#00b37e", "#ff4d8d", "#ffb84d", "#38bdf8", "#f97316"];
+      return {
+        nickname: nickname.trim().slice(0, 20),
+        avatar: {
+          icon: icons[Math.floor(Math.random() * icons.length)],
+          bg: bgs[Math.floor(Math.random() * bgs.length)],
+        },
+      };
+    }
+
+    async function boot() {
+      if (!/^[A-Z]{4}$/.test(roomCode)) return fatal("Código de sala inválido.");
+      const saved = loadIdentity();
+      const canResume = !!(
+        saved && saved.roomCode === roomCode &&
+        saved.resumeToken && saved.playerId
+      );
+      // refresh/reconnect path: reuse stored identity (spec §10.5 — never
+      // create a duplicate player); first visit: ask for a fresh one
+      const resumeSource = canResume ? saved : undefined;
+      const freshIdentity = canResume ? undefined : askIdentity();
+      if (!resumeSource && !freshIdentity) return;
+
+      try {
+        const { socket: s, ack, resumed } = await connectAndAuth({
+          roomCode,
+          identity: resumeSource,
+          freshIdentity,
+        });
+        socket = s;
+        if (!resumed) saveIdentity(roomCode, ack.data);
+        wire(s);
+      } catch (e) {
+        fatal(e?.errorCode === "NICKNAME_TAKEN"
+          ? "Esse nome já está em uso."
+          : e?.errorCode === "ROOM_NOT_FOUND"
+            ? "Sala não encontrada — confirma o código."
+            : `Não foi possível entrar (${e?.errorCode ?? e?.message ?? "?"}).`);
+      }
+    }
+
+    function wire(s) {
+      const ind = el("conn-indicator");
+      s.on("disconnect", () => {
+        ind.textContent = "a reconectar…"; ind.className = "conn-badge bad";
+        el("reconnect-banner").classList.add("show");
+      });
+      s.on("connect", () => {
+        ind.textContent = "ligado"; ind.className = "conn-badge ok";
+        el("reconnect-banner").classList.remove("show");
+        requestSnapshot(s);
+      });
+      onSnapshot(s, (snapshot) => { snap = snapshot; render(); });
+      s.on("announce", (m) => flyReaction(m.kind));
+      syncClock(s, (o) => { offsetMs = o; });
+      renderReactionsBar();
+    }
+
+    /* ---------- rendering ---------- */
+
+    function render() {
+      if (!snap) return;
+      if (snap.you?.role === "spectator") return renderSpectator();
+      switch (snap.phase) {
+        case "lobby": return renderLobby();
+        case "game": return renderGame();
+        case "results": return renderResults();
+        case "closed": return fatal("A sala foi fechada pelo anfitrião.");
+      }
+    }
+
+    function renderSpectator() {
+      app.innerHTML = "";
+      app.append(h("section", { class: "card center" },
+        h("h2", {}, "Estás a assistir 👀"),
+        h("p", { class: "waiting-note" }, snap.game
+          ? `${snap.game.name} está em curso. O anfitrião pode promover-te a jogador depois.`
+          : "À espera que a festa comece."),
+        scoreboardMini()));
+    }
+
+    function renderLobby() {
+      const you = snap.you;
+      app.innerHTML = "";
+      app.append(
+        h("section", { class: "card center" },
+          h("div", { class: "code-display", style: "font-size:2.6rem;" }, snap.roomCode),
+          h("p", { class: "waiting-note" }, "Partilha o código com os amigos!")),
+        h("section", { class: "card" },
+          h("h2", {}, "Pronto para jogar?"),
+          h("button", {
+            class: "btn big " + (you.ready ? "" : "good"),
+            onclick: () => socket.emit("player:ready", { ready: !you.ready }, () => {}),
+          }, you.ready ? "✔ Estou pronto (tocar para cancelar)" : "Estou pronto!"),
+          h("p", { class: "waiting-note" },
+            `${snap.players.filter(p => p.ready).length}/${snap.players.filter(p=>p.role!=="spectator").length} prontos`)),
+        playerListCard(),
+        h("section", { class: "card" },
+          h("h2", {}, "Identidade"),
+          h("button", {
+            class: "btn",
+            onclick: async () => {
+              const id = askIdentity();
+              if (!id) return;
+              socket.emit("player:update", id, (ack) => {
+                if (!ack.accepted) alert(ack.reason ?? "Nome já em uso");
+                else saveIdentity(snap.roomCode, { ...loadIdentity(), resumeToken: you.id ? loadIdentity()?.resumeToken : undefined });
+              });
+            },
+          }, "✏️ Mudar nome/avatar")),
+      );
+    }
+
+    function renderGame() {
+      const g = snap.game;
+      const priv = snap.you?.privateView ?? {};
+      const pub = g?.publicView ?? {};
+      app.innerHTML = "";
+
+      // quiz-rush native shape + generic contract both supported
+      const controls = buildControls(pub, priv);
+
+      app.append(h("section", { class: "card center" },
+        h("span", { class: "phase-pill" }, g?.phaseLabel ?? ""),
+        priv.prompt || pub.questionText
+          ? h("h2", { style: "margin:12px 0;" }, priv.prompt ?? pub.questionText)
+          : null,
+        timerBar(priv.deadlineAt ?? g?.deadlineAt),
+        priv.statusText ? h("p", { class: "waiting-note" }, priv.statusText) : null,
+        ...controls));
+    }
+
+    function buildControls(pub, priv) {
+      const send = (type, payload) => {
+        socket.emit("game:action", {
+          eventId: crypto.randomUUID(),
+          clientSeq: Date.now(),
+          type,
+          payload,
+        }, (ack) => {
+          if (!ack.accepted && ack.errorCode !== "DUPLICATE_ACTION") {
+            flashNote(ack.reason ?? ack.errorCode ?? "ação recusada");
+          }
+        });
+      };
+
+      const out = [];
+
+      // generic contract first
+      if (Array.isArray(priv.choices)) {
+        priv.choices.forEach((c, i) =>
+          out.push(h("button", { class: "btn choice-btn primary",
+            onclick: () => send("CHOICE", { index: i }) },
+            typeof c === "string" ? c : c.label)));
+        return out;
+      }
+      if (priv.buzzerEnabled) {
+        out.push(h("button", { class: "btn buzzer-btn",
+          onclick: () => send("BUZZ", {}) }, "🔔 BUZZ!"));
+        return out;
+      }
+      if (Array.isArray(priv.cells)) {
+        out.push(h("div", { class: "grid-btns" },
+          priv.cells.map(c =>
+            h("button", {
+              class: "cell" + (c.marked ? " marked" : ""),
+              onclick: () => !c.marked && send("MARK", { cellId: c.id }),
+            }, c.label))));
+        for (const cl of priv.claimable ?? []) {
+          out.push(h("button", { class: "btn good", style: "margin-top:10px;",
+            onclick: () => send("CLAIM", { kind: cl.kind }) }, cl.label));
+        }
+        return out;
+      }
+      if (Array.isArray(priv.voteOptions)) {
+        priv.voteOptions.forEach(o =>
+          out.push(h("button", { class: "btn choice-btn",
+            onclick: () => send("VOTE", { optionId: o.id }) }, o.label)));
+        return out;
+      }
+      if (priv.textInput) {
+        const ta = h("textarea", { class: "input", rows: 3, placeholder: priv.textPlaceholder ?? "Escreve aqui…" });
+        out.push(ta, h("button", { class: "btn primary",
+          onclick: () => { const t = ta.value.trim(); if (t) { send("TEXT", { text: t }); ta.value = ""; } } },
+          "Enviar"));
+        return out;
+      }
+      if (Array.isArray(priv.targets)) {
+        priv.targets.forEach(t =>
+          out.push(h("button", { class: `btn big ${t.style ?? ""}`,
+            onclick: () => send("TAP", { target: t.id }) }, t.label)));
+        return out;
+      }
+
+      // quiz-rush legacy shape
+      if (Array.isArray(pub.choices)) {
+        if (priv.answered) {
+          out.push(h("p", { class: "waiting-note" },
+            `✔ Resposta recebida — ${priv.waitingText ?? "aguardando outros jogadores"}`));
+        } else {
+          pub.choices.forEach((c, i) =>
+            out.push(h("button", { class: "btn choice-btn primary",
+              onclick: () => send("SUBMIT_ANSWER", { choice: i }) }, c)));
+        }
+        if ((priv.streak ?? 0) >= 2) {
+          out.push(h("p", { class: "waiting-note" }, `🔥 streak ×${priv.streak}`));
+        }
+        return out;
+      }
+
+      out.push(h("p", { class: "waiting-note" },
+        priv.waitingText ?? priv.disabledText ?? "Aguarda a próxima fase…"));
+      return out;
+    }
+
+    function renderResults() {
+      const r = snap.results;
+      app.innerHTML = "";
+      const me = r?.rows?.find(row => row.playerId === snap.you?.id);
+      app.append(
+        h("section", { class: "card center" },
+          h("h2", {}, "Fim do jogo!"),
+          me ? h("p", { style: "font-size:1.4rem; margin-top:8px;" },
+                `${me.rank}º lugar · ${me.score} pts${me.title ? ` · ${me.title}` : ""}`)
+             : null),
+        scoreboardMini(),
+        h("section", { class: "card center" },
+          h("p", { class: "waiting-note" }, "O anfitrião escolhe o próximo jogo…")));
+    }
+
+    function scoreboardMini() {
+      const rows = snap.results?.rows
+        ?? [...snap.players].sort((a, b) => b.score - a.score)
+            .map((p, i) => ({ rank: i + 1, nickname: p.nickname, score: p.score }));
+      return h("table", { class: "score-table" },
+        rows.map(rw =>
+          h("tr", { class: rw.playerId === snap.you?.id || rw.nickname === myNickname() ? "me" : "" },
+            h("td", { class: "rank" }, String(rw.rank)),
+            h("td", {}, rw.nickname),
+            h("td", { style: "text-align:right;font-weight:700;color:var(--acc-2)" }, String(rw.score)))));
+    }
+    function myNickname() {
+      return snap.players.find(p => p.id === snap.you?.id)?.nickname;
+    }
+
+    function playerListCard() {
+      return h("section", { class: "card" }, h("h2", {}, "Na sala"), 
+        h("div", { class: "player-grid" },
+          snap.players.map(p =>
+            h("div", { class: "player-chip" },
+              h("span", { class: "avatar", style: `background:${p.avatar.bg}` }, p.avatar.icon),
+              h("div", {}, p.nickname,
+                p.role === "host" ? " 👑" : "",
+                p.connected ? "" : " 💤")))));
+    }
+
+    function timerBar(deadlineAt) {
+      if (!deadlineAt) return h("span");
+      const fill = h("div", { class: "timer-fill", style: "width:100%" });
+      requestAnimationFrame(function upd() {
+        if (!document.body.contains(fill)) return;
+        const remainMs = deadlineAt - (Date.now() + offsetMs);
+        const pct = Math.max(0, Math.min(100, remainMs / 150));
+        fill.style.width = pct + "%";
+        fill.classList.toggle("urgent", pct < 25);
+        requestAnimationFrame(upd);
+      });
+      return h("div", { class: "timer-bar" }, fill);
+    }
+
+    /* ---------- reactions ---------- */
+
+    function renderReactionsBar() {
+      if (snap?.reactionsMuted) { el("reactions").innerHTML = ""; return; }
+      const bar = el("reactions");
+      bar.innerHTML = "";
+      REACTIONS.forEach((emoji, i) => {
+        bar.append(h("button", {
+          class: "rx-btn",
+          onclick: () => socket.emit("reaction:send", { kind: ["thumbsup","heart","laugh","clap","wow"][i] }, () => {}),
+        }, emoji));
+      });
+    }
+    function flyReaction(kind) {
+      if (snap?.reactionsMuted) return;
+      const map = { thumbsup: "👍", heart: "❤️", laugh: "😂", clap: "👏", wow: "😮" };
+      const node = h("span", { class: "flying-rx" }, map[kind] ?? "🎉");
+      node.style.left = `${10 + Math.random() * 80}%`;
+      document.body.append(node);
+      setTimeout(() => node.remove(), 2500);
+    }
+
+    let noteEl = null;
+    function flashNote(text) {
+      if (noteEl) noteEl.remove();
+      noteEl = h("p", { class: "waiting-note", style: "color:var(--err)" }, text);
+      app.append(noteEl);
+      setTimeout(() => noteEl?.remove(), 2500);
+    }
+
+    el("btn-leave").addEventListener("click", () => {
+      clearIdentity();
+      location.href = "/";
+    });
+
+    window.addEventListener("capabilities-ready", () => {}, { once: true });
+    detectCapabilities();
+
+    boot();
+  </script>
+</body>
+</html>

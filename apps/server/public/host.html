@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Palco — RS Party Hub</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="banner" id="reconnect-banner">A reconectar…</div>
+  <nav class="topbar">
+    <div class="brand">RS <span>Party Hub</span> — Palco</div>
+    <div class="conn-badge bad" id="conn-indicator">desligado</div>
+  </nav>
+
+  <main class="wrap" id="app">
+    <section class="card center">
+      <h2>A ligar…</h2>
+    </section>
+  </main>
+
+  <script type="module">
+    import {
+      loadIdentity, saveIdentity, onSnapshot, requestSnapshot, syncClock, el, h,
+    } from "/js/client.js";
+
+    let snap = null;
+    let offsetMs = 0;
+    let socket = null;
+    let games = [];
+    const app = el("app");
+
+    /* ---------- rendering ---------- */
+
+    function render() {
+      if (!snap) return;
+      document.title = `Sala ${snap.roomCode} — RS Party Hub`;
+      app.innerHTML = "";
+      app.append(headerCard());
+      if (snap.phase === "lobby") renderLobby();
+      else if (snap.phase === "game") renderGame();
+      else if (snap.phase === "results") renderResults();
+      else if (snap.phase === "closed") {
+        app.append(h("section", { class: "card center" },
+          h("h2", {}, "A festa terminou. Até já! 👋")));
+      }
+    }
+
+    function headerCard() {
+      const card = h("section", { class: "card center" });
+      if (snap.phase === "lobby") {
+        card.append(
+          h("div", { class: "code-display" }, snap.roomCode),
+          h("div", { class: "qr-box", id: "qr-slot" }, "a gerar QR…"),
+          h("p", { class: "waiting-note" }, "Aponta a câmara do telefone para o QR ou escreve o código."),
+        );
+        fetch(`/api/qr?room=${snap.roomCode}`).then(r => r.ok ? r.text() : "").then(svg => {
+          const slot = document.getElementById("qr-slot");
+          if (slot && svg) slot.innerHTML = svg;
+        });
+      } else {
+        card.append(h("div", { class: "code-display", style: "font-size:2.4rem;" }, snap.roomCode));
+      }
+      return card;
+    }
+
+    function renderLobby() {
+      const ready = snap.players.filter(p => p.ready).length;
+      app.append(
+        h("section", { class: "card" },
+          h("h2", {}, `Jogadores prontos ${ready}/${snap.players.length}`),
+          playerGrid()),
+        h("section", { class: "card" },
+          h("h2", {}, "Escolher jogo"),
+          h("select", { id: "game-select", class: "input" }, gameOptions()),
+          h("button", { class: "btn primary big", style: "margin-top:10px;",
+            onclick: startSelectedGame }, "▶ Começar jogo"),
+          h("button", { class: "btn good big", style: "margin-top:10px;",
+            onclick: () => socket.emit("party-mix:start",
+              { count: Number(document.getElementById("mix-count").value) }, () => {}) },
+            "🎲 Party Mix ",
+            h("select", { id: "mix-count", style: "color:#000;padding:6px;border-radius:8px;margin-left:6px;" },
+              [3, 5, 7].map(n => h("option", { value: n }, `${n} jogos`))))),
+        moderationCard());
+    }
+
+    function gameOptions() {
+      const active = snap.players.filter(p => p.role !== "spectator").length;
+      return games.map(g =>
+        h("option", { value: g.id, disabled: g.minPlayers > active || active > g.maxPlayers },
+          `${g.name} (${g.minPlayers}–${g.maxPlayers} jogadores)`));
+    }
+
+    function startSelectedGame() {
+      const sel = document.getElementById("game-select");
+      if (!sel?.value) return;
+      socket.emit("game:start", { gameId: sel.value }, () => {});
+    }
+
+    function renderGame() {
+      const g = snap.game;
+      const pub = g?.publicView ?? {};
+      const card = h("section", { class: "card center" },
+        h("span", { class: "phase-pill" }, g?.phaseLabel ?? g?.phase ?? ""),
+        h("h1", { style: "margin:12px 0; font-size:1.9rem;" },
+          pub.questionText ?? g?.name ?? ""),
+        Array.isArray(pub.choices) && pub.choices.length
+          ? h("div", { style: "display:grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap:10px; max-width:720px; margin:0 auto;" },
+              pub.choices.map((c) => h("div", { class: "btn choice-btn", style: "cursor:default;" }, c)))
+          : null,
+        timerBar(),
+        h("p", { class: "waiting-note" },
+          pub.answeredCount !== undefined
+            ? `${pub.answeredCount}/${pub.playerCount} respostas recebidas` : ""),
+      );
+      app.append(card);
+      if (pub.scoreboard?.length) app.append(scoreboardCard(pub.scoreboard));
+      if (pub.lastRound) app.append(lastRoundCard(pub.lastRound));
+      app.append(playerGridCard(), moderationCard());
+    }
+
+    function renderResults() {
+      const r = snap.results;
+      const card = h("section", { class: "card" },
+        h("h2", {}, r?.gameName ? `Resultados — ${r.gameName}` : "Resultados"),
+        h("div", { class: "results-podium" },
+          (r?.rows ?? []).map(row =>
+            h("div", { class: "podium-row" + (row.rank === 1 ? " first" : "") },
+              h("span", { class: "podium-rank" },
+                row.rank <= 3 ? ["🥇", "🥈", "🥉"][row.rank - 1] : String(row.rank)),
+              h("strong", {}, row.nickname),
+              row.title ? h("span", { class: "p-meta" }, row.title) : null,
+              h("span", { style: "margin-left:auto; font-weight:800; color:var(--acc-2)" },
+                String(row.score))))));
+      const awards = r?.awards?.length
+        ? h("section", { class: "card" }, h("h2", {}, "Prémios"),
+            ...r.awards.map(a => h("p", {}, `🏅 ${a.label}`)))
+        : null;
+      app.append(card);
+      if (awards) app.append(awards);
+      app.append(playerGridCard(), moderationCard());
+    }
+
+    function playerGrid() {
+      return h("div", { class: "player-grid" },
+        snap.players.map(p =>
+          h("div", { class: "player-chip" },
+            h("span", { class: "avatar", style: `background:${p.avatar.bg}` }, p.avatar.icon),
+            h("div", {},
+              h("div", {}, p.nickname,
+                p.role === "host" ? " 👑" : p.role === "spectator" ? " 👀" : ""),
+              h("div", { class: "p-meta" },
+                `${p.score} pts · ${p.connected ? "ligado" : "offline"}${p.ready ? " · pronto" : ""}`)))));
+    }
+    const playerGridCard = () => h("section", { class: "card" }, h("h2", {}, "Sala"), playerGrid());
+
+    function scoreboardCard(rows) {
+      return h("section", { class: "card" }, h("h2", {}, "Placar"),
+        h("table", { class: "score-table" },
+          rows.slice(0, 10).map((r, i) =>
+            h("tr", {},
+              h("td", { class: "rank" }, String(i + 1)),
+              h("td", {}, r.nickname),
+              h("td", { style: "text-align:right;font-weight:700;color:var(--acc-2)" },
+                String(r.total))))));
+    }
+
+    function lastRoundCard(lr) {
+      return h("section", { class: "card" }, h("h2", {}, "Última ronda"),
+        h("p", {}, `Resposta correta revelada no ecrã`),
+        h("p", { class: "waiting-note" },
+          lr.correctIds.length ? `${lr.correctIds.length} acertaram!` : "Ninguém acertou."));
+    }
+
+    function timerBar() {
+      const wrap = h("div", { class: "timer-bar" },
+        h("div", { class: "timer-fill", id: "timer-fill", style: "width:0%" }));
+      requestAnimationFrame(updateTimer);
+      return wrap;
+      function updateTimer() {
+        const fill = document.getElementById("timer-fill");
+        if (!fill || !document.body.contains(fill)) return;
+        if (!snap?.game?.deadlineAt) { fill.style.width = "0%"; }
+        else {
+          const remainMs = snap.game.deadlineAt - (Date.now() + offsetMs);
+          // visual window scales between 5s and 60s depending on phase label
+          const pct = Math.max(0, Math.min(100, (remainMs / 15_000) * 100));
+          fill.style.width = pct > 0 ? `${Math.min(100, pct)}%` : "0%";
+          fill.classList.toggle("urgent", pct < 25);
+        }
+        requestAnimationFrame(updateTimer);
+      }
+    }
+
+    function moderationCard() {
+      return h("section", { class: "card" }, h("h2", {}, "Controles do anfitrião"),
+        h("div", { style: "display:flex; gap:8px; flex-wrap:wrap;" },
+          snap.phase !== "lobby"
+            ? h("button", { class: "btn danger", onclick: () => emitControl({ op: "end-game" }) }, "Terminar jogo")
+            : null,
+          snap.phase === "results"
+            ? h("button", { class: "btn primary", onclick: () => emitControl({ op: "return-to-lobby" }) }, "Voltar ao lobby")
+            : null,
+          h("button", { class: "btn", onclick: () => emitControl({ op: "lock-joins", locked: !snap.locked }) },
+            snap.locked ? "🔓 Abrir entradas" : "🔒 Fechar entradas"),
+          h("button", { class: "btn", onclick: () => emitControl({ op: "mute-reactions", muted: !snap.reactionsMuted }) },
+            snap.reactionsMuted ? "🔔 Reações ON" : "🔕 Reações OFF"),
+        ));
+    }
+    const emitControl = (control) => socket.emit("host:control", control, () => {});
+
+    /* ---------- connection ---------- */
+
+    const conn = el("conn-indicator");
+    function wire(s) {
+      s.on("disconnect", () => {
+        conn.textContent = "a reconectar…"; conn.className = "conn-badge bad";
+        el("reconnect-banner").classList.add("show");
+      });
+      s.on("connect", () => {
+        conn.textContent = "LAN ligada"; conn.className = "conn-badge ok";
+        el("reconnect-banner").classList.remove("show");
+        requestSnapshot(s);
+      });
+      onSnapshot(s, (snapshot) => { snap = snapshot; render(); });
+      syncClock(s, (o) => { offsetMs = o; });
+    }
+
+    async function main() {
+      const { io } = await import("/socket.io/socket.io.esm.min.js");
+      const s = io({ transports: ["websocket", "polling"], reconnectionDelayMax: 4000 });
+      socket = s;
+
+      fetch("/api/games").then(r => r.json()).then(d => { games = d.games ?? []; });
+
+      const saved = loadIdentity();
+      const hostNick = sessionStorage.getItem("rs-party:host-nick") ?? "Anfitrião";
+
+      s.on("connect", () => {
+        if (saved?.resumeToken && saved.role === "host") {
+          s.emit("room:join", {
+            roomCode: saved.roomCode,
+            playerId: saved.playerId,
+            resumeToken: saved.resumeToken,
+          }, (ack) => {
+            if (!ack.accepted) fatal(`Sessão expirada (${ack.errorCode}). Recarrega para criar nova sala.`);
+          });
+        } else if (!s.data?.created) {
+          s.data = { created: true };
+          s.emit("room:create", {
+            identity: {
+              nickname: hostNick.slice(0, 20) || "Anfitrião",
+              avatar: { icon: "🎤", bg: "#7c5cff" },
+            },
+          }, (ack) => {
+            if (!ack.accepted) return fatal(`Falha ao criar sala: ${ack.errorCode}`);
+            saveIdentity(ack.data.roomCode, ack.data);
+          });
+        }
+      });
+      wire(s);
+    }
+
+    function fatal(msg) {
+      app.innerHTML = `<section class="card center"><h2>${msg}</h2></section>`;
+    }
+
+    main();
+  </script>
+</body>
+</html>

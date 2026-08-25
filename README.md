@@ -1,0 +1,76 @@
+# RS Party Hub
+
+> **Liga ao Wi‑Fi, abre o navegador, entra na sala e joga.**
+
+Plataforma local-first de party games: um PC anfitrião serve a aplicação pela rede local; os telemóveis dos jogadores tornam-se controladores privados via navegador — sem contas, sem Internet, sem instalação.
+
+![status](https://img.shields.io/badge/testes-105%2F105-brightgreen) ![stack](https://img.shields.io/badge/Node-22.13%2B-blue)
+
+## Arranque rápido
+
+```bash
+# requisitos: Node.js >= 22.13, corepack (incluído no Node)
+corepack enable
+pnpm install
+
+# iniciar o servidor (porta 3210 por defeito)
+pnpm --filter @rs-party/server dev
+```
+
+Depois:
+
+| Papel | Endereço |
+|---|---|
+| Anfitrião (palco + QR) | `http://localhost:3210/host` |
+| Jogadores (mesma rede Wi‑Fi) | QR mostrado no palco ou `http://<IP-do-host>:3210` |
+| Administração | `http://localhost:3210/admin` (token opcional) |
+
+Funciona em HTTP local de propósito — núcleo 100% operável sem HTTPS nem Internet (spec §7).
+
+## Jogos incluídos (P0)
+
+| Jogo | Tipo | Controlador |
+|---|---|---|
+| Quiz Rush | trivia com streak | escolhas |
+| Buzzer Arena | buzzer com juiz | botão gigante |
+| Majority Vote | previsão social | voto secreto |
+| Live Bingo | cartelas seeded | grelha |
+| Bluff Battle | enganar com bluffes | texto + voto |
+| Draw & Guess | desenho e adivinhação | canvas + texto |
+| Charades | mímica com palavra secreta | tap (ator) |
+| Spy Room | dedução social | cartas + voto |
+| Hot Potato | batata quente com fusível secreto | tap |
+| Survey Says | respostas populares | texto |
+
+## Arquitetura
+
+```text
+apps/
+  server/          Fastify + Socket.IO + node:sqlite (autoridade única)
+  server/public/   Frontend vanilla ES-modules servido na mesma origem
+packages/
+  protocol/        Schemas Zod, envelopes, códigos de erro, contratos de vistas
+  persistence/     SQLite (WAL), migrations versionadas, repositories tipados
+  game-engine/     Contrato de plugins, PRNG seeded, clock, registry, harness
+  games/*          Um pacote por jogo (plugin puro + testes determinísticos)
+```
+
+Princípios (spec): servidor autoritativo; aleatoriedade só seeded no servidor; ACK para ações críticas; idempotência por `eventId`; snapshots filtrados por papel (segredos nunca no payload público); reconexão por token sem duplicar jogador; broadcasts coalescidos (50 ms) para escala 30 clientes.
+
+## Scripts úteis
+
+```bash
+pnpm test                                   # suite completa (vitest)
+pnpm -r typecheck                           # tsc --noEmit em todos os pacotes
+corepack pnpm vitest run --config vitest.load.config.ts   # simulação de carga (30 clientes)
+```
+
+## Configuração
+
+Ver `.env.example`. Diretório de dados: `RS_PARTY_HOME` (default `./.rs-party-home`, nunca commitado). A pasta `library/` nunca é apagada pela app; `temp/` é limpo por TTL de 24 h.
+
+## Documentação adicional
+
+- `IMPLEMENTATION_REPORT.md` — evidências reais de implementação, testes e carga
+- `CHANGELOG.md` — histórico de versões
+- Specs completas: `RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_{1..4}_OF_4.md`

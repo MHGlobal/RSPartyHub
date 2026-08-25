@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin — RS Party Hub</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <nav class="topbar">
+    <div class="brand">RS <span>Party Hub</span> — Admin</div>
+    <div class="conn-badge ok">local</div>
+  </nav>
+  <main class="wrap">
+    <section class="card">
+      <h2>Autenticação</h2>
+      <div class="field">
+        <label class="lbl" for="token">Token de administrador (RS_PARTY_ADMIN_TOKEN)</label>
+        <input id="token" class="input" type="password" placeholder="token" />
+      </div>
+      <button class="btn primary" id="btn-load">Carregar painel</button>
+    </section>
+    <div id="panel"></div>
+  </main>
+
+  <script type="module">
+    import { el, h } from "/js/client.js";
+    const panel = el("panel");
+
+    el("btn-load").addEventListener("click", load);
+    el("token").addEventListener("keydown", (e) => e.key === "Enter" && load());
+
+    async function load() {
+      const token = el("token").value.trim();
+      const res = await fetch("/api/admin/overview", { headers: { "x-admin-token": token } });
+      if (!res.ok) {
+        panel.innerHTML = `<section class="card"><h2 style="color:var(--err)">Token inválido</h2></section>`;
+        return;
+      }
+      const data = await res.json();
+      render(data);
+    }
+
+    function render(data) {
+      panel.innerHTML = "";
+      const sys = data.system;
+      panel.append(h("section", { class: "card" },
+        h("h2", {}, "Sistema"),
+        h("p", {}, `Node ${sys.node} · RSS ${sys.rssMb} MB · heap ${sys.heapUsedMb} MB · uptime ${sys.uptimeSec}s`)));
+
+      const rooms = data.rooms ?? [];
+      panel.append(h("section", { class: "card" },
+        h("h2", {}, `Salas ativas (${rooms.length})`),
+        rooms.length
+          ? h("table", { class: "score-table" },
+              rooms.map(r => h("tr", {},
+                h("td", {}, h("strong", {}, r.code)),
+                h("td", {}, r.phase),
+                h("td", {}, `${r.players} jogadores`),
+                h("td", {}, r.currentGame ?? "—"),
+                r.locked ? h("td", {}, "🔒") : h("td"))))
+          : h("p", { class: "waiting-note" }, "Nenhuma sala ativa.")));
+
+      const audit = data.recentAudit ?? [];
+      panel.append(h("section", { class: "card" },
+        h("h2", {}, "Auditoria recente"),
+        h("table", { class: "score-table" },
+          audit.slice(0, 20).map(a => h("tr", {},
+            h("td", { class: "rank" }, new Date(a.at).toLocaleTimeString()),
+            h("td", {}, a.event_type),
+            h("td", { class: "p-meta" }, a.category))))));
+    }
+  </script>
+</body>
+</html>

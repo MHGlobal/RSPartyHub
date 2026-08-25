@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>RS Party Hub</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <nav class="topbar">
+    <div class="brand">RS <span>Party Hub</span></div>
+    <div class="conn-badge ok" id="net-indicator">LAN: a verificar…</div>
+  </nav>
+
+  <main class="wrap center">
+    <section class="card">
+      <h1 style="font-size:2.2rem; margin-bottom:6px;">A festa começa aqui 🎉</h1>
+      <p class="waiting-note">Liga ao Wi‑Fi, abre o navegador e entra na sala. Sem contas, sem Internet.</p>
+      <p class="waiting-note" id="lan-info"></p>
+    </section>
+
+    <section class="card">
+      <h2>Anfitrião</h2>
+      <button class="btn primary big" id="btn-host">Criar festa</button>
+    </section>
+
+    <section class="card">
+      <h2>Jogador</h2>
+      <div class="field">
+        <label class="lbl" for="room-code">Código da sala</label>
+        <input id="room-code" class="input center" maxlength="4"
+               placeholder="ABCD" autocomplete="off" autocapitalize="characters"
+               style="text-transform:uppercase; font-size:1.8rem; letter-spacing:.3em;" />
+      </div>
+      <button class="btn good big" id="btn-join">Entrar ➜</button>
+      <p class="waiting-note hidden" id="join-error" style="color:var(--err)"></p>
+    </section>
+
+    <footer class="waiting-note">
+      <a href="/admin" style="color:var(--ink-2)">Administração</a> ·
+      <a href="/host" style="color:var(--ink-2)">Palco do anfitrião</a>
+    </footer>
+  </main>
+
+  <script type="module">
+    import { h, el } from "/js/client.js";
+
+    fetch("/api/info").then(r => r.json()).then(info => {
+      const lan = info.lanCandidates?.[0];
+      el("lan-info").textContent = lan
+        ? `Servidor ativo em ${info.baseUrl}:${location.port}`
+        : "Sem rede LAN detetada — funciona apenas neste dispositivo.";
+      // prefill room code from QR link /join/CODE?t=…
+      const m = location.pathname.match(/^\/join\/([A-Za-z]+)/);
+      if (m) {
+        el("room-code").value = m[1].toUpperCase();
+        el("btn-join").focus();
+      }
+    });
+
+    el("btn-host").addEventListener("click", () => {
+      const nickname = prompt("O teu nome de anfitrião:", "Anfitrião");
+      if (!nickname?.trim()) return;
+      sessionStorage.setItem("rs-party:host-nick", nickname.trim().slice(0, 20));
+      location.href = "/host";
+    });
+
+    function join() {
+      const code = el("room-code").value.trim().toUpperCase();
+      const errEl = el("join-error");
+      if (!/^[A-Z]{4}$/.test(code)) {
+        errEl.textContent = "Código inválido — 4 letras.";
+        errEl.classList.remove("hidden");
+        return;
+      }
+      localStorage.removeItem("rs-party:identity");
+      location.href = `/play?room=${code}`;
+    }
+    el("btn-join").addEventListener("click", join);
+    el("room-code").addEventListener("keydown", (e) => e.key === "Enter" && join());
+  </script>
+</body>
+</html>

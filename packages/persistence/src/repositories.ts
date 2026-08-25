@@ -1,0 +1,274 @@
+/** Mirrors node:sqlite SqlValue without importing the module type. */
+type SqlValue = string | number | bigint | Uint8Array | null;
+
+import type {
+  AuditEventRow,
+  Database,
+  GameInstanceRow,
+  PlayerRow,
+  RoomRow,
+} from "./database.js";
+import { newId } from "./id-gen.js";
+
+/* ---------------- Rooms ---------------- */
+
+export class RoomRepository {
+  constructor(private readonly db: Database) {}
+
+  create(opts: {
+    id: string;
+    code: string;
+    maxPlayers: number;
+    settings?: Record<string, unknown>;
+    now: number;
+  }): RoomRow {
+    this.db
+      .prepare(
+        `INSERT INTO rooms (id, code, status, host_player_id, locked, max_players, settings_json, current_game_id, state_version, created_at, updated_at)
+         VALUES (?, ?, 'lobby', NULL, 0, ?, '{}', NULL, 1, ?, ?)`,
+      )
+      .run(opts.id, opts.code, opts.maxPlayers, opts.now, opts.now);
+    return this.byId(opts.id)!;
+  }
+
+  byId(id: string): RoomRow | undefined {
+    return this.db.prepare(`SELECT * FROM rooms WHERE id = ?`).get(id) as
+      | RoomRow
+      | undefined;
+  }
+
+  byCode(code: string): RoomRow | undefined {
+    return this.db.prepare(`SELECT * FROM rooms WHERE code = ?`).get(code) as
+      | RoomRow
+      | undefined;
+  }
+
+  activeByCode(code: string): RoomRow | undefined {
+    return this.db
+      .prepare(`SELECT * FROM rooms WHERE code = ? AND status != 'closed'`)
+      .get(code) as RoomRow | undefined;
+  }
+
+  update(id: string, patch: Partial<RoomRow>): void {
+    const allowed = new Set<keyof RoomRow>([
+      "status",
+      "host_player_id",
+      "locked",
+      "max_players",
+      "settings_json",
+      "current_game_id",
+      "state_version",
+    ]);
+    const sets: string[] = [];
+    const vals: SqlValue[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!allowed.has(k as keyof RoomRow)) continue;
+      sets.push(`${k} = ?`);
+      vals.push((v === undefined ? null : v) as SqlValue);
+    }
+    if (sets.length === 0) return;
+    sets.push(`updated_at = ?`);
+    vals.push(Date.now(), id);
+    this.db.prepare(`UPDATE rooms SET ${sets.join(", ")} WHERE id = ?`).run(...(vals as SqlValue[]));
+  }
+
+  countActive(): number {
+    const r = this.db
+      .prepare(`SELECT COUNT(*) AS c FROM rooms WHERE status != 'closed'`)
+      .get() as { c: number };
+    return Number(r.c);
+  }
+}
+
+/* ---------------- Players ---------------- */
+
+export class PlayerRepository {
+  constructor(private readonly db: Database) {}
+
+  create(opts: {
+    id: string;
+    roomId: string;
+    nickname: string;
+    avatarIcon: string;
+    avatarBg: string;
+    role: string;
+    resumeTokenHash: string;
+    capabilities: Record<string, unknown>;
+    now: number;
+  }): PlayerRow {
+    this.db
+      .prepare(
+        `INSERT INTO players (id, room_id, nickname, avatar_icon, avatar_bg, role, resume_token_hash, connected, ready, score, capabilities_json, joined_at, last_seen_at, kicked)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, 0)`,
+      )
+      .run(
+        opts.id,
+        opts.roomId,
+        opts.nickname,
+        opts.avatarIcon,
+        opts.avatarBg,
+        opts.role,
+        opts.resumeTokenHash,
+        JSON.stringify(opts.capabilities ?? {}),
+        opts.now,
+        opts.now,
+      );
+    return this.byId(opts.id)!;
+  }
+
+  byId(id: string): PlayerRow | undefined {
+    return this.db.prepare(`SELECT * FROM players WHERE id = ?`).get(id) as
+      | PlayerRow
+      | undefined;
+  }
+
+  byResumeTokenHash(hash: string): PlayerRow | undefined {
+    return this.db
+      .prepare(`SELECT * FROM players WHERE resume_token_hash = ? AND kicked = 0`)
+      .get(hash) as PlayerRow | undefined;
+  }
+
+  byRoom(roomId: string): PlayerRow[] {
+    return this.db
+      .prepare(`SELECT * FROM players WHERE room_id = ? ORDER BY joined_at ASC`)
+      .all(roomId) as unknown as PlayerRow[];
+  }
+
+  nicknameTaken(roomId: string, nickname: string, excludeId?: string): boolean {
+    const row = this.db
+      .prepare(
+        `SELECT id FROM players WHERE room_id = ? AND LOWER(nickname) = LOWER(?) AND kicked = 0`,
+      )
+      .get(roomId, nickname) as { id: string } | undefined;
+    return row !== undefined && row.id !== excludeId;
+  }
+
+  countActiveInRoom(roomId: string): number {
+    const r = this.db
+      .prepare(`SELECT COUNT(*) AS c FROM players WHERE room_id = ? AND kicked = 0`)
+      .get(roomId) as { c: number };
+    return Number(r.c);
+  }
+
+  update(id: string, patch: Partial<PlayerRow>): void {
+    const allowed = new Set<keyof PlayerRow>([
+      "nickname",
+      "avatar_icon",
+      "avatar_bg",
+      "role",
+      "connected",
+      "ready",
+      "score",
+      "capabilities_json",
+      "last_seen_at",
+      "kicked",
+    ]);
+    const sets: string[] = [];
+    const vals: SqlValue[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!allowed.has(k as keyof PlayerRow)) continue;
+      sets.push(`${k} = ?`);
+      vals.push((v === undefined ? null : v) as SqlValue);
+    }
+    if (sets.length === 0) return;
+    vals.push(id);
+    this.db.prepare(`UPDATE players SET ${sets.join(", ")} WHERE id = ?`).run(...(vals as SqlValue[]));
+  }
+}
+
+/* ---------------- Game instances ---------------- */
+
+export class GameInstanceRepository {
+  constructor(private readonly db: Database) {}
+
+  create(opts: {
+    pluginId: string;
+    roomId: string;
+    seed: number;
+    now: number;
+  }): GameInstanceRow {
+    const id = newId("game");
+    this.db
+      .prepare(
+        `INSERT INTO game_instances (id, room_id, plugin_id, seed, phase, round_number, round_total, state_json, started_at)
+         VALUES (?, ?, ?, ?, 'SETUP', 0, 0, '{}', ?)`,
+      )
+      .run(id, opts.roomId, opts.pluginId, opts.seed, opts.now);
+    return this.byId(id)!;
+  }
+
+  byId(id: string): GameInstanceRow | undefined {
+    return this.db.prepare(`SELECT * FROM game_instances WHERE id = ?`).get(id) as
+      | GameInstanceRow
+      | undefined;
+  }
+
+  currentForRoom(roomId: string): GameInstanceRow | undefined {
+    return this.db
+      .prepare(
+        `SELECT * FROM game_instances WHERE room_id = ? ORDER BY started_at DESC LIMIT 1`,
+      )
+      .get(roomId) as GameInstanceRow | undefined;
+  }
+
+  update(id: string, patch: Partial<GameInstanceRow>): void {
+    const allowed = new Set<keyof GameInstanceRow>([
+      "phase",
+      "round_number",
+      "round_total",
+      "state_json",
+      "ended_at",
+      "result_json",
+    ]);
+    const sets: string[] = [];
+    const vals: SqlValue[] = [];
+    for (const [k, v] of Object.entries(patch)) {
+      if (!allowed.has(k as keyof GameInstanceRow)) continue;
+      sets.push(`${k} = ?`);
+      vals.push((v === undefined ? null : v) as SqlValue);
+    }
+    if (sets.length === 0) return;
+    vals.push(id);
+    this.db.prepare(`UPDATE game_instances SET ${sets.join(", ")} WHERE id = ?`).run(...(vals as SqlValue[]));
+  }
+}
+
+/* ---------------- Audit ---------------- */
+
+export interface AuditInput {
+  severity?: "info" | "warn" | "error";
+  category: string;
+  roomId?: string | null;
+  playerId?: string | null;
+  eventType: string;
+  metadata?: Record<string, unknown>;
+}
+
+export class AuditRepository {
+  constructor(private readonly db: Database) {}
+
+  append(input: AuditInput): void {
+    // metadata must be pre-sanitized by callers (no tokens/secrets — spec §AX)
+    this.db
+      .prepare(
+        `INSERT INTO audit_events (id, at, severity, category, room_id, player_id, event_type, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        newId("aud"),
+        Date.now(),
+        input.severity ?? "info",
+        input.category,
+        input.roomId ?? null,
+        input.playerId ?? null,
+        input.eventType,
+        JSON.stringify(input.metadata ?? {}),
+      );
+  }
+
+  recent(limit = 100): AuditEventRow[] {
+    return this.db
+      .prepare(`SELECT * FROM audit_events ORDER BY at DESC LIMIT ?`)
+      .all(limit) as unknown as AuditEventRow[];
+  }
+}

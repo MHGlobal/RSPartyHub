@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+coverage/
+*.log
+.DS_Store
+.env
+.env.local
+data/
+!data/.gitkeep
+tmp/
+.vite/
+playwright-report/
+test-results/
+
+# runtime data (DB, uploads, logs) — never commit
+.rs-party-home/

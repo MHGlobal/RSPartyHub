@@ -1,0 +1,37 @@
+{
+  "name": "rs-party-hub",
+  "version": "0.1.0",
+  "private": true,
+  "description": "RS Party Hub \u2014 local-first multiplayer party platform over LAN/hotspot",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "packageManager": "pnpm@10.34.5",
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 run build",
+    "typecheck": "pnpm -r --workspace-concurrency=1 run typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "dev:server": "pnpm --filter @rs-party/server dev",
+    "start": "pnpm --filter @rs-party/server start"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/qrcode": "^1.5.6",
+    "socket.io-client": "^4.8.3",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "@fastify/static": "^8",
+    "fastify": "^5",
+    "qrcode": "^1.5",
+    "socket.io": "^4.8"
+  }
+}
