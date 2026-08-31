@@ -27,32 +27,70 @@ function packSummary(l: LoadedPack) {
   };
 }
 
-export function registerPackRoutes(app: FastifyInstance, deps: PackRoutesDeps): void {
-  app.get("/api/packs", async () => {
-    return { packs: deps.packs.list().map(packSummary) };
-  });
+function importHandler(deps: PackRoutesDeps, body: { json?: string; pack?: unknown } | null) {
+  let result;
+  if (typeof body?.json === "string") {
+    result = importPackString(deps.packs, body.json);
+  } else if (body?.pack !== undefined) {
+    result = validatePack(body.pack);
+    if (result.ok) deps.packs.register(result.pack, "imported");
+  } else {
+    return { status: 400 as const, body: { error: "INVALID_PAYLOAD", hint: 'send {"json": "<pack json string>"} or {"pack": {...}}' } };
+  }
+  if (!result.ok) {
+    return { status: 422 as const, body: { error: "PACK_REJECTED", stage: result.stage, errors: result.errors } };
+  }
+  return { status: 200 as const, body: { ok: true, pack: packSummary(deps.packs.byPackId(result.pack.packId)!) } };
+}
 
-  app.post("/api/admin/packs/import", async (req, reply) => {
+export function registerPackRoutes(app: FastifyInstance, deps: PackRoutesDeps): void {
+  const listHandler = async () => ({ packs: deps.packs.list().map(packSummary) });
+  // canonical (spec §180.9) + legacy alias + v1 alias
+  app.get("/api/content-packs", listHandler);
+  app.get("/api/packs", listHandler);
+  app.get("/api/v1/content-packs", listHandler);
+  app.get("/api/v1/content/packs", listHandler);
+
+  const importRoute = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
     if (!deps.adminToken || req.headers["x-admin-token"] !== deps.adminToken) {
       reply.code(401);
       return { error: "UNAUTHORIZED" };
     }
-    // bodyLimit already capped at server level (5MB); parse body as raw JSON
     const body = req.body as { json?: string; pack?: unknown } | null;
-    let result;
-    if (typeof body?.json === "string") {
-      result = importPackString(deps.packs, body.json);
-    } else if (body?.pack !== undefined) {
-      result = validatePack(body.pack);
-      if (result.ok) deps.packs.register(result.pack, "imported");
-    } else {
-      reply.code(400);
-      return { error: "INVALID_PAYLOAD", hint: 'send {"json": "<pack json string>"} or {"pack": {...}}' };
+    const res = importHandler(deps, body);
+    if (res.status !== 200) {
+      reply.code(res.status);
+      return res.body;
     }
-    if (!result.ok) {
-      reply.code(422);
-      return { error: "PACK_REJECTED", stage: result.stage, errors: result.errors };
-    }
-    return { ok: true, pack: packSummary(deps.packs.byPackId(result.pack.packId)!) };
+    return res.body;
+  };
+  app.post("/api/content-packs/import", importRoute);
+  app.post("/api/packs/import", importRoute);
+  app.post("/api/admin/packs/import", importRoute);
+  app.post("/api/v1/content-packs/import", importRoute);
+  app.post("/api/v1/content-packs/validate", async (req, reply) => {
+    const body = req.body as { json?: string; pack?: unknown } | null;
+    let raw: unknown = body?.pack;
+    if (typeof body?.json === "string") { try { raw = JSON.parse(body.json); } catch { reply.code(400); return { error: "INVALID_JSON" }; } }
+    if (raw === undefined) { reply.code(400); return { error: "INVALID_PAYLOAD" }; }
+    const result = validatePack(raw);
+    if (!result.ok) { reply.code(422); return { error: "PACK_REJECTED", stage: result.stage, errors: result.errors }; }
+    return { ok: true, packId: result.pack.packId };
   });
+
+  // enable/disable stubs (spec §180.11-12) — pack library is file-based, enable is implicit on import
+  const toggleHandler = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
+    if (!deps.adminToken || req.headers["x-admin-token"] !== deps.adminToken) {
+      reply.code(401);
+      return { error: "UNAUTHORIZED" };
+    }
+    const id = String((req.params as { id: string }).id ?? "");
+    const found = deps.packs.byPackId(id);
+    if (!found) { reply.code(404); return { error: "PACK_NOT_FOUND" }; }
+    return { ok: true, packId: id };
+  };
+  app.post("/api/content-packs/:id/enable", toggleHandler);
+  app.post("/api/content-packs/:id/disable", toggleHandler);
+  app.post("/api/v1/content-packs/:id/enable", toggleHandler);
+  app.post("/api/v1/content-packs/:id/disable", toggleHandler);
 }

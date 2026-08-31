@@ -4,7 +4,7 @@
 
 Plataforma local-first de party games: um PC anfitrião serve a aplicação pela rede local; os telemóveis dos jogadores tornam-se controladores privados via navegador — sem contas, sem Internet, sem instalação.
 
-![status](https://img.shields.io/badge/testes-105%2F105-brightgreen) ![stack](https://img.shields.io/badge/Node-22.13%2B-blue)
+![status](https://img.shields.io/badge/testes-132%2F132-brightgreen) ![stack](https://img.shields.io/badge/Node-22.13%2B-blue)
 
 ## Arranque rápido
 

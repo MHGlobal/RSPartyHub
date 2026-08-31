@@ -49,6 +49,7 @@ export async function buildHttp(deps: HttpDeps) {
   });
 
   app.get("/healthz", async () => ({ ok: true }));
+  app.get("/api/health", async () => ({ ok: true }));
 
   app.get("/readyz", async () => {
     let dbOk = false;

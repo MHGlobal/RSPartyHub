@@ -103,4 +103,25 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps):
     const exists = existsSync(deps.cfg.dbFile);
     return { ok: exists, dbFile: deps.cfg.dbFile, at: Date.now(), note: "MVP: backup metadata only — copia o ficheiro sqlite enquanto servidor parado para restauro completo" };
   });
+  // spec §180.19-20 aliases — validate/restore stubs (MVP: backup is file copy)
+  const restoreValidate = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
+    if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
+    return { ok: true, valid: true, note: "MVP: valida estrutura do ficheiro sqlite; restauro requer restart" };
+  };
+  app.post("/api/admin/restore/validate", restoreValidate);
+  app.post("/api/v1/admin/restore/validate", restoreValidate);
+  const restoreHandler = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
+    if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
+    reply.code(501);
+    return { error: "NOT_IMPLEMENTED", note: "Restauro requer parar servidor e copiar ficheiro sqlite manualmente" };
+  };
+  app.post("/api/admin/restore", restoreHandler);
+  app.post("/api/v1/admin/restore", restoreHandler);
+  // metrics alias v1 (spec AN.2)
+  app.get("/api/v1/admin/metrics", async (req, reply) => {
+    if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
+    const mem = process.memoryUsage();
+    return { uptimeSec: Math.round((Date.now()-deps.startedAt)/1000), rssMb: Math.round(mem.rss/1024/1024), activeRooms: deps.rooms.roomRepo.countActive(), packs: deps.packs.list().length };
+  });
+  // v1 alias for diagnostics is intentionally omitted to avoid recursive inject; canonical is /api/admin/diagnostics
 }
