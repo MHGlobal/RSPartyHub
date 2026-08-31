@@ -1,6 +1,6 @@
 {
   "name": "rs-party-hub",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "RS Party Hub \u2014 local-first multiplayer party platform over LAN/hotspot",
   "type": "module",
