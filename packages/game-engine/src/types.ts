@@ -24,8 +24,11 @@ export interface RoomPlayerRef {
   role: "player" | "spectator";
 }
 
+/** JSON-safe setting value — includes injected content arrays (etapa 15). */
+export type SettingsValue = number | boolean | string | unknown[];
+
 export interface GameSettingsValues {
-  [key: string]: number | boolean | string;
+  [key: string]: SettingsValue;
 }
 
 /**

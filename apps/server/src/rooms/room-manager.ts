@@ -23,6 +23,8 @@ import {
 import type { Database } from "@rs-party/persistence";
 import type { RuntimePlayerRef } from "../runtime/game-runtime.js";
 import { GameRuntime } from "../runtime/game-runtime.js";
+import type { PackLibrary } from "@rs-party/content";
+import type { GameSettingsValues } from "@rs-party/game-engine";
 import type { ServerConfig } from "../config.js";
 
 export interface JoinInput {
@@ -97,6 +99,7 @@ export class RoomManager {
     readonly db: Database,
     readonly registry: GameRegistry,
     readonly cfg: ServerConfig,
+    readonly packs?: PackLibrary,
   ) {
     this.roomRepo = new RoomRepository(db);
     this.playerRepo = new PlayerRepository(db);
@@ -428,7 +431,7 @@ export class RoomManager {
 
   /* ---------------- game start / party mix ---------------- */
 
-  startGame(roomId: string, hostPlayerId: string, pluginId: string, settings?: Record<string, number | boolean | string>): void {
+  startGame(roomId: string, hostPlayerId: string, pluginId: string, settings?: Record<string, unknown>): void {
     const room = this.rooms.get(roomId);
     const host = room?.players.get(hostPlayerId);
     if (!room || !host || host.role !== "host") throw joinErr("NOT_HOST");
@@ -442,9 +445,16 @@ export class RoomManager {
     if (activeCount < plugin.manifest.minPlayers) throw joinErr("MIN_PLAYERS");
 
     // apply defaults from manifest settings schema
-    const merged: Record<string, number | boolean | string> = {};
-    for (const f of plugin.manifest.settings) merged[f.key] = f.default;
+    const merged: GameSettingsValues = {};
+    for (const f of plugin.manifest.settings) merged[f.key] = f.default as never;
     Object.assign(merged, settings ?? {});
+
+    // content pack selection (etapa 15): validated pack questions injected
+    if (typeof merged.packId === "string" && this.packs) {
+      const loaded = this.packs.byPackId(merged.packId);
+      if (!loaded || loaded.pack.kind !== "quiz") throw joinErr("GAME_NOT_FOUND", `pack ${String(merged.packId)} not found`);
+      merged.questions = loaded.pack.questions;
+    }
 
     room.results = undefined;
     room.phase = "game";
@@ -463,7 +473,7 @@ export class RoomManager {
     room: MemRoom,
     pluginId: string,
     existingInstanceId?: string,
-    settings?: Record<string, number | boolean | string>,
+    settings?: GameSettingsValues,
   ): void {
     const plugin = this.registry.require(pluginId);
     const seed = SeededRandomSeed();

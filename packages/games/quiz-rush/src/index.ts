@@ -78,7 +78,18 @@ function settingsFrom(ctx: GameContext) {
   const rounds = clampInt(Number(s.rounds ?? 5), 1, 15);
   const seconds = clampInt(Number(s.secondsPerQuestion ?? 15), 5, 60);
   const category = String(s.category ?? "all");
-  return { rounds, seconds, category };
+  // Content pack injection (etapa 15): server validates packs and passes
+  // the question array through settings.questions (JSON-safe).
+  let packQuestions: QuizQuestion[] | null = null;
+  if (Array.isArray(s.questions) && s.questions.length >= 5) {
+    const candidate = s.questions as unknown as QuizQuestion[];
+    const okShape = candidate.every(
+      (q) => q && typeof q.id === "string" && Array.isArray(q.choices) &&
+        typeof q.correctIndex === "number" && q.correctIndex < q.choices.length,
+    );
+    if (okShape) packQuestions = candidate;
+  }
+  return { rounds, seconds, category, packQuestions };
 }
 
 function clampInt(v: number, min: number, max: number): number {
@@ -145,11 +156,12 @@ export const quizRushPlugin: PartyGamePlugin<
   },
 
   createInitialState(ctx): QuizRushState {
-    const { rounds, category } = settingsFrom(ctx);
-    const pool = questionBank.filter(
+    const { rounds, category, packQuestions } = settingsFrom(ctx);
+    const source = packQuestions ?? questionBank;
+    const pool = source.filter(
       (q) => category === "all" || q.category === category,
     );
-    const questions = ctx.rng.shuffle(pool.length >= rounds ? pool : questionBank).slice(0, rounds);
+    const questions = ctx.rng.shuffle(pool.length >= rounds ? pool : source).slice(0, rounds);
     return {
       phase: "ROUND_PREP",
       phaseLabel: "A preparar a pergunta…",

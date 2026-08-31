@@ -10,12 +10,15 @@ import QRCode from "qrcode";
 import { buildJoinUrls } from "./discovery.js";
 import type { RoomManager } from "./rooms/room-manager.js";
 import type { ServerConfig } from "./config.js";
+import type { PackLibrary } from "@rs-party/content";
+import { registerPackRoutes } from "./pack-routes.js";
 import { newToken } from "@rs-party/protocol";
 
 export interface HttpDeps {
   cfg: ServerConfig;
   rooms: RoomManager;
   adminToken?: string;
+  packs: PackLibrary;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +67,8 @@ export async function buildHttp(deps: HttpDeps) {
   app.get("/api/games", async () => {
     return { games: deps.rooms.registry.list() };
   });
+
+  registerPackRoutes(app, { packs: deps.packs, adminToken: deps.adminToken });
 
   /** Issue a short-lived join token for a room and render its QR (spec §6.5). */
   app.get<{ Querystring: { room: string } }>("/api/qr", async (req, reply) => {

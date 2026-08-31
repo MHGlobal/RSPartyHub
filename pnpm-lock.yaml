@@ -42,6 +42,9 @@ importers:
       '@fastify/static':
         specifier: ^8.0.0
         version: 8.3.0
+      '@rs-party/content':
+        specifier: workspace:*
+        version: link:../../packages/content
       '@rs-party/game-engine':
         specifier: workspace:*
         version: link:../../packages/game-engine
@@ -90,6 +93,15 @@ importers:
       socket.io:
         specifier: ^4.8.0
         version: 4.8.3
+
+  packages/content:
+    dependencies:
+      '@rs-party/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   packages/game-engine:
     dependencies:

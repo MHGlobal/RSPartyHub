@@ -9,8 +9,11 @@ import { Database } from "@rs-party/persistence";
 import { GameRegistry } from "@rs-party/game-engine";
 import { RoomManager } from "./rooms/room-manager.js";
 import { registerAllGames } from "./runtime/register-games.js";
+import { PackLibrary } from "@rs-party/content";
+import quizRushPlugin from "@rs-party/games-quiz-rush";
 import { Server as SocketServer } from "socket.io";
 import { primaryLanAddress } from "./discovery.js";
+import { join } from "node:path";
 
 export interface BootedServer {
   close(): Promise<void>;
@@ -31,11 +34,27 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
   const registry = new GameRegistry();
   await registerAllGames(registry);
 
-  const rooms = new RoomManager(db, registry, cfg);
+  // Content packs (etapa 15): disk library + built-in PT quiz bank
+  const packs = new PackLibrary(join(cfg.homeDir, "library", "packs"));
+  packs.loadFromDisk();
+  packs.register(
+    {
+      kind: "quiz",
+      packId: "builtin-quiz-pt",
+      title: "Quiz PT — Banco interno",
+      locale: "pt",
+      rating: "family",
+      version: 1,
+      questions: (quizRushPlugin as unknown as { questionBank?: unknown[] }).questionBank ?? [],
+    } as never,
+    "builtin",
+  );
+
+  const rooms = new RoomManager(db, registry, cfg, packs);
   const rehydrated = rooms.rehydrate();
   if (rehydrated > 0) console.log(`[boot] rehydrated ${rehydrated} game session(s)`);
 
-  const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken });
+  const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs });
 
   const io = new SocketServer(app.server, {
     cors: { origin: true, credentials: false },

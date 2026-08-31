@@ -26,6 +26,7 @@
     "@rs-party/games-charades": "workspace:*",
     "@rs-party/games-spy-room": "workspace:*",
     "@rs-party/games-hot-potato": "workspace:*",
-    "@rs-party/games-survey-says": "workspace:*"
+    "@rs-party/games-survey-says": "workspace:*",
+    "@rs-party/content": "workspace:*"
   }
 }

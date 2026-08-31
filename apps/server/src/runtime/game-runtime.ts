@@ -6,6 +6,7 @@
 import type {
   GameBaseState,
   GameContext,
+  GameSettingsValues,
   PartyGamePlugin,
 } from "@rs-party/game-engine";
 import { RealClock, SeededRng } from "@rs-party/game-engine";
@@ -33,7 +34,7 @@ export class GameRuntime {
     seed: number,
     private readonly games: GameInstanceRepository,
     private readonly playersProvider: () => RuntimePlayerRef[],
-    private readonly settingsProvider: () => Record<string, number | boolean | string>,
+    private readonly settingsProvider: () => GameSettingsValues,
     private readonly announce: (level: "info" | "success" | "error", text: string) => void,
     private readonly onFinished: (state: GameBaseState) => void,
     private readonly onStateChange?: () => void,
