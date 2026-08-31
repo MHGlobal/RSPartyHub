@@ -7,7 +7,8 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "dev": "node --experimental-strip-types --no-warnings src/index.ts",
-    "start": "node --experimental-strip-types --no-warnings src/index.ts"
+    "start": "node --experimental-strip-types --no-warnings src/index.ts",
+    "doctor": "node scripts/doctor.mjs"
   },
   "dependencies": {
     "@fastify/multipart": "^10.1.1",

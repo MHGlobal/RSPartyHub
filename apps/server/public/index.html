@@ -7,12 +7,19 @@
   <link rel="stylesheet" href="/css/style.css" />
 </head>
 <body>
-  <nav class="topbar">
-    <div class="brand">RS <span>Party Hub</span></div>
-    <div class="conn-badge ok" id="net-indicator">LAN: a verificar…</div>
+  <a class="skip-link" href="#main">Saltar para conteúdo</a>
+  <nav class="topbar" role="navigation" aria-label="principal">
+    <div class="brand" aria-label="RS Party Hub">RS <span>Party Hub</span></div>
+    <div style="display:flex; gap:10px; align-items:center">
+      <label for="lang-sel" class="lbl" style="margin:0">🌐</label>
+      <select id="lang-sel" aria-label="Idioma" style="background:var(--bg-0); color:var(--ink-0); border:1px solid rgba(255,255,255,.2); border-radius:8px; padding:6px">
+        <option value="pt">PT</option><option value="en">EN</option>
+      </select>
+      <div class="conn-badge ok" id="net-indicator" role="status" aria-live="polite">LAN: a verificar…</div>
+    </div>
   </nav>
 
-  <main class="wrap center">
+  <main class="wrap center" id="main">
     <section class="card">
       <h1 style="font-size:2.2rem; margin-bottom:6px;">A festa começa aqui 🎉</h1>
       <p class="waiting-note">Liga ao Wi‑Fi, abre o navegador e entra na sala. Sem contas, sem Internet.</p>
@@ -44,6 +51,15 @@
 
   <script type="module">
     import { h, el } from "/js/client.js";
+    // i18n toggle (etapa 18) — fetch dict and apply to known keys; persist in localStorage
+    const sel = document.getElementById("lang-sel");
+    const saved = localStorage.getItem("rs-party:locale") || "pt";
+    sel.value = saved;
+    sel.addEventListener("change", () => { localStorage.setItem("rs-party:locale", sel.value); location.reload(); });
+    fetch(`/api/i18n/${saved}`).then(r=>r.json()).then(({dict})=>{
+      const q = s=>document.querySelector(s);
+      if(q("#btn-host") && dict["lobby.hostStart"]) q("#btn-host").textContent = dict["lobby.hostStart"]==="Start game"?"Create party":q("#btn-host").textContent;
+    }).catch(()=>{});
 
     fetch("/api/info").then(r => r.json()).then(info => {
       const lan = info.lanCandidates?.[0];

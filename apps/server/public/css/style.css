@@ -154,5 +154,17 @@ canvas#drawpad {
 
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001s !important; transition-duration: .001s !important; }
+  .flying-rx { display:none !important; }
 }
+@media (prefers-contrast: more) {
+  .card { border-color: var(--ink-0); }
+  .btn { border-width: 2px; }
+}
+:focus-visible { outline: 2px solid var(--acc-2); outline-offset: 2px; }
+:focus:not(:focus-visible) { outline: none; }
+.skip-link {
+  position:absolute; left:-9999px; top:auto; width:1px; height:1px; overflow:hidden;
+}
+.skip-link:focus { position:fixed; left:12px; top:12px; width:auto; height:auto; padding:8px 12px; background:var(--ink-0); color:var(--bg-0); border-radius:8px; z-index:100; }
+.btn, .input, .rx-btn, .cell { min-height:44px; }
 .hidden { display:none !important; }
