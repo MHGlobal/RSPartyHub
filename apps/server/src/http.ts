@@ -17,6 +17,8 @@ import type { MediaService } from "./media/media-service.js";
 import { registerJukeboxRoutes } from "./jukebox/jukebox-routes.js";
 import { registerPhotoWallRoutes } from "./photo-wall/photo-wall-routes.js";
 import type { JukeboxService } from "./jukebox/jukebox-service.js";
+import { registerI18nRoutes } from "./i18n/i18n-routes.js";
+import { registerDiagnosticsRoutes } from "./diagnostics/diagnostics-routes.js";
 import { newToken } from "@rs-party/protocol";
 
 export interface HttpDeps {
@@ -82,6 +84,8 @@ export async function buildHttp(deps: HttpDeps) {
   registerMediaRoutes(app, { media: deps.media, adminToken: deps.adminToken });
   registerJukeboxRoutes(app, { jukebox: deps.jukebox, adminToken: deps.adminToken });
   registerPhotoWallRoutes(app, { media: deps.media, db: deps.rooms.db });
+  registerI18nRoutes(app);
+  registerDiagnosticsRoutes(app, { cfg: deps.cfg, db: deps.rooms.db, packs: deps.packs, rooms: deps.rooms, adminToken: deps.adminToken, startedAt });
 
   // Security headers (spec AK.4) — safe for HTTP LAN
   app.addHook("onSend", async (_req, reply) => {
