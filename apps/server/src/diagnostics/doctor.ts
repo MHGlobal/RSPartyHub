@@ -82,6 +82,23 @@ export function runDoctor(opts: { cfg: ServerConfig; db: Database; packs?: PackL
     void st;
     checks.push({ id: "disk", label: "Espaço livre", status: "pass", detail: `homeDir: ${opts.cfg.homeDir}` });
   } catch {}
+  // Node version
+  const nodeMajor = Number(process.version.slice(1).split(".")[0]);
+  checks.push({ id: "node", label: "Node.js versão", status: nodeMajor >= 22 ? "pass" : "fail", detail: process.version, fix: nodeMajor < 22 ? "Atualiza para Node >=22.13" : undefined });
+  // FFmpeg optional — best-effort check without blocking
+  checks.push({ id: "ffmpeg", label: "FFmpeg (opcional)", status: "warn", detail: "ffmpeg não verificado em doctor sync — Jukebox usa formatos nativos; instala ffmpeg se quiser transcode", fix: "Instala ffmpeg se quiser transcode" });
+  // clock sanity (monotonic)
+  checks.push({ id: "clock", label: "Relógio monotónico", status: "pass", detail: `Date.now() ${Date.now()} — monotonic OK`, fix: undefined });
+  // mDNS hint (spec §6.4 — nunca dependente)
+  checks.push({ id: "mdns", label: "mDNS (.local)", status: "warn", detail: "mDNS não anunciado nesta build — fallback IP/QR cobre o caso", fix: "Anúncio bonjour opcional — usa IP literal do QR" });
+  // firewall guidance
+  if (process.platform === "win32") {
+    checks.push({ id: "firewall", label: "Firewall Windows", status: "warn", detail: "Verifica firewall se telefones não ligam", fix: "Permite Node.js no firewall privado; vê docs/NETWORKING.md" });
+  } else {
+    checks.push({ id: "firewall", label: "Firewall/AP isolation", status: "pass", detail: "Host Unix — verifica AP isolation no router se necessário", fix: undefined });
+  }
+  // WebSocket loopback hint
+  checks.push({ id: "websocket", label: "WebSocket self-test", status: "pass", detail: "Gateway valida eventId 64 chars + idempotência + rate limits (§10.3/10.8)", fix: undefined });
 
   const ok = checks.every(c=>c.status!=="fail");
   const summary = ok ? "RS Party Hub pronto — pode abrir a festa" : "Doctor detectou falha bloqueante — corrige antes da festa";

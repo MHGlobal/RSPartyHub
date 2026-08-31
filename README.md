@@ -4,7 +4,7 @@
 
 Plataforma local-first de party games: um PC anfitrião serve a aplicação pela rede local; os telemóveis dos jogadores tornam-se controladores privados via navegador — sem contas, sem Internet, sem instalação.
 
-![status](https://img.shields.io/badge/testes-132%2F132-brightgreen) ![stack](https://img.shields.io/badge/Node-22.13%2B-blue)
+![status](https://img.shields.io/badge/testes-140%2F140-brightgreen) ![stack](https://img.shields.io/badge/Node-22.13%2B-blue)
 
 ## Arranque rápido
 
@@ -61,8 +61,14 @@ Princípios (spec): servidor autoritativo; aleatoriedade só seeded no servidor;
 
 ```bash
 pnpm test                                   # suite completa (vitest)
+pnpm verify                                 # typecheck + test (CI gate)
 pnpm -r typecheck                           # tsc --noEmit em todos os pacotes
-corepack pnpm vitest run --config vitest.load.config.ts   # simulação de carga (30 clientes)
+pnpm test:load                              # simulação de carga (30 clientes)
+pnpm doctor                                 # diagnóstico pré-festa
+./scripts/verify.sh                         # checklist limpa Etapa 24
+# Docker
+docker build -t rs-party-hub . && docker run -p 3210:3210 -v rs-party-data:/data rs-party-hub
+docker compose up --build
 ```
 
 ## Configuração
@@ -73,4 +79,6 @@ Ver `.env.example`. Diretório de dados: `RS_PARTY_HOME` (default `./.rs-party-h
 
 - `IMPLEMENTATION_REPORT.md` — evidências reais de implementação, testes e carga
 - `CHANGELOG.md` — histórico de versões
-- Specs completas: `RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_{1..4}_OF_4.md`
+- `SECURITY.md` + `docs/NETWORKING.md` + `docs/TROUBLESHOOTING.md` — hardening, rede e diagnóstico
+- `docs/adr/` — 8 ADRs (autoridade, Socket.IO, SQLite, frontend, LAN core, same-origin, WebRTC opcional, plugin engine)
+- Specs completas: `/home/ubuntu/specs-archive/RSPartyHub/RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_{1..4}_OF_4.md`

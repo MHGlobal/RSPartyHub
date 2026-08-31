@@ -3,6 +3,18 @@
 Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-PT/1.1.0/);
 versão inicial segue [Semantic Versioning](https://semver.org/lang/pt-PT/).
 
+## [0.3.0] — 2026-08-31 — Etapas 20→24 hardening, chaos/load, packaging, docs
+
+### Added
+- Etapa 20 — Hardening: CORS LAN allowlist (`RS_PARTY_CORS_ORIGINS`), CSP `base-uri self object-src none`, `Cache-Control no-store`, `maxHttpBufferSize 64KB`, `X-Powered-By`; suite `security.test.ts` (XSS, traversal, headers, admin auth, rate-limit) — 5 testes.
+- Etapa 21 — Chaos/resiliência: `chaos.test.ts` (duplicate eventId idempotência, disconnect/resume, restart rehydrate) — 3 testes; load segue `vitest.load.config.ts` (30 clientes).
+- Etapa 22 — Packaging: `Dockerfile` + `docker-compose.yml` + `.dockerignore` + `start.sh`/`start.bat` + `HEALTHCHECK /healthz`; `package.json#verify` e `scripts/verify.sh`.
+- Etapa 23 — Docs: `docs/adr/ADR-001..008`, `SECURITY.md`, `docs/NETWORKING.md`, `docs/TROUBLESHOOTING.md`, `.env.example` com `RS_PARTY_LOG_LEVEL/CORS_ORIGINS/HOSTNAME`.
+- Aliases §180: `GET /api/network`, `/api/v1/network`, `/api/v1/games`, `/api/games/:pluginId`, `/api/v1/admin/diagnostics|doctor|metrics|restore`, `/api/v1/health`; `GET /api/rooms` stub; Doctor checks expandidos (Node, ffmpeg hint, clock, mDNS, firewall, WebSocket).
+
+### Changed
+- `http.ts` CSP hardening + headers; `index.ts` CORS validação LAN privada + localhost + allowlist; `doctor.ts` + `diagnostics-routes.ts` expandidos; total **140/140** testes verdes.
+
 ## [0.2.0] — 2026-08-31 — Etapas 15→19 completas (100% spec P0 + hardening)
 
 ### Added

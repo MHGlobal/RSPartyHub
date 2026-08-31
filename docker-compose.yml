@@ -1,0 +1,22 @@
+# RS Party Hub — docker-compose (spec §AO.3)
+services:
+  rs-party-hub:
+    build: .
+    ports:
+      - "3210:3210"
+    volumes:
+      - rs-party-data:/data
+    environment:
+      - RS_PARTY_HOME=/data
+      - RS_PARTY_PORT=3210
+      - RS_PARTY_BIND=0.0.0.0
+      # - RS_PARTY_ADMIN_TOKEN=troca-isto
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3210/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  rs-party-data:

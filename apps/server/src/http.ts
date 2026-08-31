@@ -50,6 +50,10 @@ export async function buildHttp(deps: HttpDeps) {
 
   app.get("/healthz", async () => ({ ok: true }));
   app.get("/api/health", async () => ({ ok: true }));
+  app.get("/api/v1/health", async () => ({ ok: true }));
+  // rooms stubs §180.3-6 minimal (lobby already via Socket.IO; HTTP mirrors for tooling)
+  app.get("/api/rooms", async () => ({ rooms: deps.rooms.listActiveRooms().map((r) => ({ code: r.code, phase: r.phase, players: r.players.size })) }));
+  app.get("/api/v1/rooms", async () => ({ rooms: deps.rooms.listActiveRooms().map((r) => ({ code: r.code, phase: r.phase, players: r.players.size })) }));
 
   app.get("/readyz", async () => {
     let dbOk = false;
@@ -70,15 +74,50 @@ export async function buildHttp(deps: HttpDeps) {
     const urls = buildJoinUrls({ port: deps.cfg.port, roomCode: "----" });
     return {
       name: "RS Party Hub",
-      version: "0.1.0",
+      version: "0.2.0",
       lanCandidates: urls.candidates,
       baseUrl: urls.baseUrl.replace("----", "").slice(0, -4),
       internet: "unknown", // client-side indicator; server never requires WAN
     };
   });
+  // §180.2 alias
+  app.get("/api/network", async () => {
+    const urls = buildJoinUrls({ port: deps.cfg.port, roomCode: "----" });
+    return {
+      name: "RS Party Hub",
+      version: "0.2.0",
+      lanCandidates: urls.candidates,
+      baseUrl: urls.baseUrl.replace("----", "").slice(0, -4),
+      internet: "unknown",
+    };
+  });
+  app.get("/api/v1/network", async () => {
+    const urls = buildJoinUrls({ port: deps.cfg.port, roomCode: "----" });
+    return {
+      name: "RS Party Hub",
+      version: "0.2.0",
+      lanCandidates: urls.candidates,
+      baseUrl: urls.baseUrl.replace("----", "").slice(0, -4),
+      internet: "unknown",
+    };
+  });
 
   app.get("/api/games", async () => {
     return { games: deps.rooms.registry.list() };
+  });
+  app.get("/api/v1/games", async () => {
+    return { games: deps.rooms.registry.list() };
+  });
+  // §180.8 single game lookup stub (manifest)
+  app.get<{ Params: { pluginId: string } }>("/api/games/:pluginId", async (req, reply) => {
+    const g = deps.rooms.registry.get(req.params.pluginId);
+    if (!g) { reply.code(404); return { error: "GAME_NOT_FOUND" }; }
+    return { game: g.manifest ?? g };
+  });
+  app.get<{ Params: { pluginId: string } }>("/api/v1/games/:pluginId", async (req, reply) => {
+    const g = deps.rooms.registry.get(req.params.pluginId);
+    if (!g) { reply.code(404); return { error: "GAME_NOT_FOUND" }; }
+    return { game: g.manifest ?? g };
   });
 
   registerPackRoutes(app, { packs: deps.packs, adminToken: deps.adminToken });
@@ -88,14 +127,16 @@ export async function buildHttp(deps: HttpDeps) {
   registerI18nRoutes(app);
   registerDiagnosticsRoutes(app, { cfg: deps.cfg, db: deps.rooms.db, packs: deps.packs, rooms: deps.rooms, adminToken: deps.adminToken, startedAt });
 
-  // Security headers (spec AK.4) — safe for HTTP LAN
+  // Security headers (spec AK.4 / §25.5) — safe for HTTP LAN
   app.addHook("onSend", async (_req, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "no-referrer");
     reply.header("X-Frame-Options", "SAMEORIGIN");
     reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-    // CSP compatible with same-origin static + inline styles used by host UI
-    reply.header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'self'");
+    reply.header("X-Powered-By", "RS Party Hub");
+    // CSP hardened: no object, base-uri self, frame-ancestors self; unsafe-inline for styles only (host UI)
+    reply.header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'self'");
+    reply.header("Cache-Control", "no-store");
   });
 
   /** Issue a short-lived join token for a room and render its QR (spec §6.5). */

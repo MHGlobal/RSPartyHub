@@ -16,6 +16,9 @@ export interface ServerConfig {
   disconnectGraceMs: number;
   /** Multiplier for rate limits; >1 only in tests/load runs. */
   rateLimitMultiplier: number;
+  /** Optional CORS allowlist (comma-separated origins); empty = same-origin + LAN IPs allowed. */
+  corsAllowedOrigins?: string[];
+  logLevel: string;
 }
 
 function intEnv(name: string, fallback: number): number {
@@ -28,6 +31,10 @@ function intEnv(name: string, fallback: number): number {
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const homeDir =
     env.RS_PARTY_HOME ?? join(process.cwd(), ".rs-party-home");
+  const corsRaw = env.RS_PARTY_CORS_ORIGINS ?? env.CORS_ALLOWED_ORIGINS ?? "";
+  const corsAllowedOrigins = corsRaw
+    ? corsRaw.split(",").map((s) => s.trim()).filter(Boolean)
+    : undefined;
   return {
     port: intEnv("RS_PARTY_PORT", 3210),
     host: env.RS_PARTY_BIND ?? "0.0.0.0",
@@ -39,6 +46,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     resultsViewMs: intEnv("RS_PARTY_RESULTS_MS", 8000),
     disconnectGraceMs: intEnv("RS_PARTY_DISCONNECT_GRACE_MS", 60_000),
     rateLimitMultiplier: intEnv("RS_PARTY_RATE_MULT", 1),
+    corsAllowedOrigins,
+    logLevel: env.RS_PARTY_LOG_LEVEL ?? env.LOG_LEVEL ?? "info",
   };
 }
 

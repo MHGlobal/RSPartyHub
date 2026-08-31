@@ -123,5 +123,30 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps):
     const mem = process.memoryUsage();
     return { uptimeSec: Math.round((Date.now()-deps.startedAt)/1000), rssMb: Math.round(mem.rss/1024/1024), activeRooms: deps.rooms.roomRepo.countActive(), packs: deps.packs.list().length };
   });
-  // v1 alias for diagnostics is intentionally omitted to avoid recursive inject; canonical is /api/admin/diagnostics
+  // v1 aliases for diagnostics/doctor (spec §180)
+  app.get("/api/v1/admin/diagnostics", async (req, reply) => {
+    if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
+    const mem = process.memoryUsage();
+    const lan = primaryLanAddress();
+    const candidates = enumerateLanCandidates();
+    let mediaCount = 0; let mediaBytes = 0;
+    try {
+      const r = deps.db.prepare("SELECT COUNT(*) as c, COALESCE(SUM(bytes),0) as s FROM media_items").get() as { c:number; s:number };
+      mediaCount = Number(r.c); mediaBytes = Number(r.s);
+    } catch {}
+    const lagStart = performance.now();
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const lagMs = performance.now() - lagStart;
+    return {
+      server: { name: "RS Party Hub", version: "0.2.0", node: process.version, uptimeSec: Math.round((Date.now()-deps.startedAt)/1000), port: deps.cfg.port, host: deps.cfg.host, adminProtected: !!deps.adminToken },
+      network: { lanPrimary: lan, candidates, internet: "unknown" },
+      storage: { homeDir: deps.cfg.homeDir, packsLoaded: deps.packs.list().length, mediaCount, mediaBytes },
+      runtime: { rssMb: Math.round(mem.rss/1024/1024), heapUsedMb: Math.round(mem.heapUsed/1024/1024), eventLoopLagMs: Math.round(lagMs*10)/10, activeRooms: deps.rooms.roomRepo.countActive() },
+      auditRecent: deps.rooms.audit.recent(20),
+    };
+  });
+  app.get("/api/v1/admin/doctor", async (req, reply) => {
+    if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
+    return runDoctor({ cfg: deps.cfg, db: deps.db, packs: deps.packs });
+  });
 }

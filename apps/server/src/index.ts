@@ -14,7 +14,7 @@ import quizRushPlugin from "@rs-party/games-quiz-rush";
 import { MediaService } from "./media/media-service.js";
 import { JukeboxService } from "./jukebox/jukebox-service.js";
 import { Server as SocketServer } from "socket.io";
-import { primaryLanAddress } from "./discovery.js";
+import { buildJoinUrls, primaryLanAddress } from "./discovery.js";
 import { join } from "node:path";
 
 export interface BootedServer {
@@ -61,10 +61,38 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
 
   const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs, media, jukebox });
 
+  // OWASP WS §25.4 — validate Origin against LAN allowlist when provided; LAN-only product tolerates same-origin + private IPs
+  const allowedOrigins = cfg.corsAllowedOrigins;
+  const isOriginAllowed = (origin: string | undefined): boolean => {
+    if (!origin) return true; // same-origin / non-browser (health checks)
+    if (allowedOrigins && allowedOrigins.length > 0) return allowedOrigins.includes(origin) || allowedOrigins.includes("*");
+    // default: allow same LAN origins and localhost; block obvious external abuse
+    try {
+      const u = new URL(origin);
+      const host = u.hostname;
+      if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+      // private IPv4 ranges (10/8, 172.16/12, 192.168/16) and .local mDNS
+      if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) || host.endsWith(".local")) return true;
+      // allow the host's own LAN candidates
+      const candidates = buildJoinUrls({ port: cfg.port, roomCode: "TEST" }).candidates.map((c: { address: string }) => c.address);
+      if (candidates.includes(host)) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  };
+
   const io = new SocketServer(app.server, {
-    cors: { origin: true, credentials: false },
+    cors: {
+      origin: (origin, cb) => {
+        if (isOriginAllowed(origin)) cb(null, true);
+        else cb(new Error("CORS origin not allowed"), false);
+      },
+      credentials: false,
+    },
     pingInterval: 10_000,
     pingTimeout: 20_000,
+    maxHttpBufferSize: 64 * 1024, // spec §29.2: ~64KB max payload
   });
   const gateway = new Gateway(io, rooms);
   gateway.attach();

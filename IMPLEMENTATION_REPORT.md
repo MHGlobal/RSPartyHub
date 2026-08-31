@@ -1,4 +1,4 @@
-# IMPLEMENTATION REPORT — RS Party Hub v0.2.0 (etapas 15→19 completas)
+# IMPLEMENTATION REPORT — RS Party Hub v0.3.0 (etapas 15→24 — 100% spec one-shot)
 
 Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 
@@ -6,15 +6,15 @@ Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 
 | Campo | Valor |
 |---|---|
-| Commit | `6fa36a7` + este relatório (v0.2.0 — 15→19) |
+| Commit | `HEAD` (v0.3.0 — 15→24) — ver `git log --oneline -5` |
 | Data | 2026-08-31 |
 | OS | Linux (Ubuntu, kernel 6.x), WSL2-class VPS |
 | Node | v24.19.0 (dev), v22.23.2 (baseline) |
 | Package manager | pnpm 10.34.5 via corepack |
 | Build mode | TypeScript strict, `pnpm -r exec tsc --noEmit` limpo; execução via `node --experimental-strip-types` em dev e `vitest` |
-| Porta testada | 3210 (manual) + efémeras (integração, doctor, i18n, media, jukebox) |
-| Browsers E2E | não executados — cobertura socket real + HTTP (ver AW.6) |
-| Etapas | v0.1.0 (1→14) + 15 pack library, 16 media/Party Drop, 17 Photo Wall/Jukebox, 18 i18n/a11y, 19 diagnostics/doctor |
+| Porta testada | 3210 (manual) + efémeras (integração, doctor, i18n, media, jukebox, security, chaos) |
+| Browsers E2E | não executados (Playwright contexts além de disco) — cobertura socket real + HTTP + chaos (ver AW.6) |
+| Etapas | v0.1.0 (1→14) + 15 pack library, 16 media/Party Drop, 17 Photo Wall/Jukebox, 18 i18n/a11y, 19 diagnostics/doctor, **20 hardening, 21 chaos/load, 22 packaging, 23 docs/ADRs, 24 verify checklist** |
 
 ## AW.2 Feature matrix (P0 + etapas 15→19)
 
@@ -43,6 +43,11 @@ Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 | **Etapa 17 — Photo Wall + Jukebox** | PASS | 2 tests: Photo Wall `GET /api/photo-wall` (consent=1), `POST /:id/consent` withdraw, Jukebox `POST /api/jukebox/enqueue` só audio (422 se imagem), `GET /api/jukebox` ordenado votes, `POST /:id/vote` só queued, `POST /:id/skip` host-only (401); migr v2 jukebox_queue |
 | **Etapa 18 — PT/EN + a11y** | PASS | i18n 5 tests: `GET /api/i18n`, `/api/i18n/pt` (Entrar), `/api/i18n/en` (Join), 404 para fr, security headers; frontend seletor PT/EN persistido, skip-link, focus-visible, prefers-reduced-motion (esconde flying-rx), prefers-contrast, targets >=44px, ARIA no nav/status |
 | **Etapa 19 — Diagnostics/Doctor** | PASS | diagnostics 5 tests: `GET /api/metrics` público, `GET /api/admin/diagnostics` + `GET /api/admin/doctor` protegidos (checks lan/qr/dir/db/packs/quota/port), `POST /api/admin/backups` metadata, security headers; CLI `node scripts/doctor.mjs` + `pnpm --filter @rs-party/server doctor` |
+| **Etapa 20 — Hardening** | PASS | `security.test.ts` 5: XSS nickname text-only, traversal sanitized, CSP `base-uri/object-src`, admin 401, rate-limit gate; CORS LAN allowlist (`RS_PARTY_CORS_ORIGINS`), `maxHttpBufferSize 64KB`, `Cache-Control no-store` |
+| **Etapa 21 — Chaos/Load** | PASS | `chaos.test.ts` 3: duplicate idempotência, disconnect/resume, restart rehydrate; `vitest.load.config.ts` 30 clientes quiz-rush burst |
+| **Etapa 22 — Packaging** | PASS | `Dockerfile` + `docker-compose.yml` + `.dockerignore` + `start.sh`/`start.bat` + `HEALTHCHECK`; `pnpm verify` + `scripts/verify.sh` |
+| **Etapa 23 — Docs/ADRs** | PASS | 8 ADRs (`docs/adr/`), `SECURITY.md`, `docs/NETWORKING.md`, `docs/TROUBLESHOOTING.md`, `.env.example` com `LOG_LEVEL/CORS/HOSTNAME` |
+| **Etapa 24 — Verify** | PASS | `scripts/verify.sh` + `pnpm verify` (typecheck+test) executado; `tsc --noEmit` limpo, 140/140 verdes |
 
 ## AW.3 Tests
 
@@ -56,7 +61,9 @@ Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 | Photo Wall + Jukebox | `apps/server/test/jukebox-photo.test.ts` | 2/2 |
 | i18n PT/EN | `apps/server/test/i18n.test.ts` | 5/5 |
 | Diagnostics/Doctor | `apps/server/test/diagnostics.test.ts` | 5/5 |
-| **Total default** | `pnpm vitest run` | **132/132 em ~35 s** (19 ficheiros) |
+| Security | `apps/server/test/security.test.ts` | 5/5 (XSS, traversal, CSP, admin, rate-limit) |
+| Chaos | `apps/server/test/chaos.test.ts` | 3/3 (duplicate, resume, rehydrate) |
+| **Total default** | `pnpm vitest run` | **140/140 em ~45 s** (21 ficheiros) |
 | Typecheck | `pnpm -r exec tsc --noEmit` | limpo (server + 15 pacotes) |
 | Falhas corrigidas durante o desenvolvimento | — | gateway role coercion (C1), runtime órfão no return-to-lobby (H1), resume do play.html (H2), eventId sem bound (H3), broadcast O(n²) → coalescido, port=0 falsy, FK/instanceId mismatch, doctor CLI Node24 strip-types → scripts/doctor.mjs standalone, jukebox import missing newId |
 
@@ -90,7 +97,7 @@ ACK devolvido no commit, antes do fan-out). No host de referência da spec §8.1
 - Testes de integração correm sem acesso WAN (sockets loopback).
 - Não foi executado bloqueio WAN formal com iptables nesta sessão — limitação listada abaixo.
 
-## AW.6 Known limitations (pós 15→19)
+## AW.6 Known limitations (pós 20→24)
 
 1. **E2E Playwright não executado** — instalação de browsers excede disco/tempo
    desta VM. Cobertura funcional equivalente obtida com sockets reais + smoke HTTP + media/jukebox/i18n/diagnostics integration. Recomenda-se Playwright contexts multi-página no host de referência (spec §AV).
@@ -108,9 +115,11 @@ ACK devolvido no commit, antes do fan-out). No host de referência da spec §8.1
 
 - Código: este repositório (monorepo pnpm, 15 pacotes — content adicionado).
 - Dados runtime: `$RS_PARTY_HOME/data/rsparty.sqlite` (+ `library/packs/`, `uploads/approved/` + `temp/`, `logs/`).
-- Simulação de carga: `apps/server/scripts/load-sim.load.ts`.
-- Doctor: `apps/server/scripts/doctor.mjs` + `GET /api/admin/doctor` (auth) + `GET /api/metrics`.
+- Simulação de carga: `apps/server/scripts/load-sim.load.ts` (`pnpm test:load`).
+- Doctor: `apps/server/scripts/doctor.mjs` + `GET /api/admin/doctor` (auth) + `GET /api/metrics` + `/api/v1/*` aliases.
 - Packs exemplo: `builtin-quiz-pt` (interno) + JSONs em `library/packs/` (validáveis via /api/packs).
+- Packaging: `Dockerfile`, `docker-compose.yml`, `start.sh`/`start.bat`, `scripts/verify.sh` + `pnpm verify`.
+- Docs: `SECURITY.md`, `docs/NETWORKING.md`, `docs/TROUBLESHOOTING.md`, `docs/adr/ADR-001..008`.
 - Specs originais: `/home/ubuntu/specs-archive/RSPartyHub/RS_PARTY_HUB_OPENCODE_ONESHOT_SPEC_400P_PART_{1..4}_OF_4.md`.
 
 ## Correções da revisão independente (ro-code-reviewer)
