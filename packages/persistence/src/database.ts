@@ -73,6 +73,30 @@ export interface AuditEventRow {
   metadata_json: string;
 }
 
+export interface MediaItemRow {
+  id: string;
+  owner_player_id: string | null;
+  room_id: string | null;
+  kind: string; // image | audio | video
+  original_name: string;
+  storage_key: string;
+  mime: string;
+  bytes: number;
+  sha256: string;
+  approved: number;
+  consent: number;
+  created_at: number;
+}
+
+export interface JukeboxRow {
+  id: string;
+  media_id: string;
+  proposer_id: string | null;
+  votes: number;
+  state: string; // queued | playing | played | skipped
+  created_at: number;
+}
+
 const MIGRATIONS: { version: number; up: string }[] = [
   {
     version: 1,
@@ -147,6 +171,35 @@ const MIGRATIONS: { version: number; up: string }[] = [
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
+    `,
+  },
+  {
+    version: 2,
+    up: `
+      CREATE TABLE IF NOT EXISTS media_items (
+        id TEXT PRIMARY KEY,
+        owner_player_id TEXT,
+        room_id TEXT,
+        kind TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        storage_key TEXT NOT NULL UNIQUE,
+        mime TEXT NOT NULL,
+        bytes INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        approved INTEGER NOT NULL DEFAULT 1,
+        consent INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_media_created ON media_items(created_at);
+      CREATE TABLE IF NOT EXISTS jukebox_queue (
+        id TEXT PRIMARY KEY,
+        media_id TEXT NOT NULL REFERENCES media_items(id) ON DELETE CASCADE,
+        proposer_id TEXT,
+        votes INTEGER NOT NULL DEFAULT 0,
+        state TEXT NOT NULL DEFAULT 'queued',
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_jukebox_state ON jukebox_queue(state, created_at);
     `,
   },
 ];

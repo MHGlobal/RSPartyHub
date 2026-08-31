@@ -10,23 +10,24 @@
     "start": "node --experimental-strip-types --no-warnings src/index.ts"
   },
   "dependencies": {
+    "@fastify/multipart": "^10.1.1",
     "@fastify/static": "^8.0.0",
+    "@rs-party/content": "workspace:*",
     "@rs-party/game-engine": "workspace:*",
+    "@rs-party/games-bluff-battle": "workspace:*",
+    "@rs-party/games-buzzer-arena": "workspace:*",
+    "@rs-party/games-charades": "workspace:*",
+    "@rs-party/games-draw-guess": "workspace:*",
+    "@rs-party/games-hot-potato": "workspace:*",
+    "@rs-party/games-live-bingo": "workspace:*",
+    "@rs-party/games-majority-vote": "workspace:*",
     "@rs-party/games-quiz-rush": "workspace:*",
+    "@rs-party/games-spy-room": "workspace:*",
+    "@rs-party/games-survey-says": "workspace:*",
     "@rs-party/persistence": "workspace:*",
     "@rs-party/protocol": "workspace:*",
     "fastify": "^5.0.0",
     "qrcode": "^1.5.0",
-    "socket.io": "^4.8.0",
-    "@rs-party/games-buzzer-arena": "workspace:*",
-    "@rs-party/games-majority-vote": "workspace:*",
-    "@rs-party/games-live-bingo": "workspace:*",
-    "@rs-party/games-bluff-battle": "workspace:*",
-    "@rs-party/games-draw-guess": "workspace:*",
-    "@rs-party/games-charades": "workspace:*",
-    "@rs-party/games-spy-room": "workspace:*",
-    "@rs-party/games-hot-potato": "workspace:*",
-    "@rs-party/games-survey-says": "workspace:*",
-    "@rs-party/content": "workspace:*"
+    "socket.io": "^4.8.0"
   }
 }

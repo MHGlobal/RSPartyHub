@@ -12,6 +12,11 @@ import type { RoomManager } from "./rooms/room-manager.js";
 import type { ServerConfig } from "./config.js";
 import type { PackLibrary } from "@rs-party/content";
 import { registerPackRoutes } from "./pack-routes.js";
+import { registerMediaRoutes } from "./media/media-routes.js";
+import type { MediaService } from "./media/media-service.js";
+import { registerJukeboxRoutes } from "./jukebox/jukebox-routes.js";
+import { registerPhotoWallRoutes } from "./photo-wall/photo-wall-routes.js";
+import type { JukeboxService } from "./jukebox/jukebox-service.js";
 import { newToken } from "@rs-party/protocol";
 
 export interface HttpDeps {
@@ -19,12 +24,17 @@ export interface HttpDeps {
   rooms: RoomManager;
   adminToken?: string;
   packs: PackLibrary;
+  media: MediaService;
+  jukebox: JukeboxService;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export async function buildHttp(deps: HttpDeps) {
-  const app = Fastify({ logger: false, bodyLimit: 5 * 1024 * 1024 });
+  const app = Fastify({ logger: false, bodyLimit: 12 * 1024 * 1024 });
+  // multipart for media uploads (spec §176) — limits enforced at service layer too
+  const multipart = (await import("@fastify/multipart")).default;
+  await app.register(multipart, { limits: { fileSize: 12 * 1024 * 1024, files: 1 } });
   const startedAt = Date.now();
 
   // per-boot join tokens reduce accidental entry (spec §6.5)
@@ -69,6 +79,19 @@ export async function buildHttp(deps: HttpDeps) {
   });
 
   registerPackRoutes(app, { packs: deps.packs, adminToken: deps.adminToken });
+  registerMediaRoutes(app, { media: deps.media, adminToken: deps.adminToken });
+  registerJukeboxRoutes(app, { jukebox: deps.jukebox, adminToken: deps.adminToken });
+  registerPhotoWallRoutes(app, { media: deps.media, db: deps.rooms.db });
+
+  // Security headers (spec AK.4) — safe for HTTP LAN
+  app.addHook("onSend", async (_req, reply) => {
+    reply.header("X-Content-Type-Options", "nosniff");
+    reply.header("Referrer-Policy", "no-referrer");
+    reply.header("X-Frame-Options", "SAMEORIGIN");
+    reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    // CSP compatible with same-origin static + inline styles used by host UI
+    reply.header("Content-Security-Policy", "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'self'");
+  });
 
   /** Issue a short-lived join token for a room and render its QR (spec §6.5). */
   app.get<{ Querystring: { room: string } }>("/api/qr", async (req, reply) => {

@@ -5,6 +5,8 @@ import type {
   AuditEventRow,
   Database,
   GameInstanceRow,
+  JukeboxRow,
+  MediaItemRow,
   PlayerRow,
   RoomRow,
 } from "./database.js";
@@ -230,6 +232,108 @@ export class GameInstanceRepository {
     if (sets.length === 0) return;
     vals.push(id);
     this.db.prepare(`UPDATE game_instances SET ${sets.join(", ")} WHERE id = ?`).run(...(vals as SqlValue[]));
+  }
+}
+
+/* ---------------- Media ---------------- */
+
+export class MediaRepository {
+  constructor(private readonly db: Database) {}
+
+  create(opts: {
+    id: string;
+    ownerPlayerId?: string | null;
+    roomId?: string | null;
+    kind: string;
+    originalName: string;
+    storageKey: string;
+    mime: string;
+    bytes: number;
+    sha256: string;
+    approved?: number;
+    consent?: number;
+    now: number;
+  }): MediaItemRow {
+    this.db
+      .prepare(
+        `INSERT INTO media_items (id, owner_player_id, room_id, kind, original_name, storage_key, mime, bytes, sha256, approved, consent, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        opts.id,
+        opts.ownerPlayerId ?? null,
+        opts.roomId ?? null,
+        opts.kind,
+        opts.originalName,
+        opts.storageKey,
+        opts.mime,
+        opts.bytes,
+        opts.sha256,
+        opts.approved ?? 1,
+        opts.consent ?? 1,
+        opts.now,
+      );
+    return this.byId(opts.id)!;
+  }
+
+  byId(id: string): MediaItemRow | undefined {
+    return this.db.prepare(`SELECT * FROM media_items WHERE id = ?`).get(id) as MediaItemRow | undefined;
+  }
+
+  list(limit = 50, offset = 0): MediaItemRow[] {
+    return this.db
+      .prepare(`SELECT * FROM media_items ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .all(limit, offset) as unknown as MediaItemRow[];
+  }
+
+  byStorageKey(key: string): MediaItemRow | undefined {
+    return this.db.prepare(`SELECT * FROM media_items WHERE storage_key = ?`).get(key) as MediaItemRow | undefined;
+  }
+
+  totalBytes(): number {
+    const r = this.db.prepare(`SELECT COALESCE(SUM(bytes),0) as s FROM media_items`).get() as { s: number };
+    return Number(r.s);
+  }
+
+  delete(id: string): void {
+    this.db.prepare(`DELETE FROM media_items WHERE id = ?`).run(id);
+  }
+
+  count(): number {
+    const r = this.db.prepare(`SELECT COUNT(*) as c FROM media_items`).get() as { c: number };
+    return Number(r.c);
+  }
+}
+
+export class JukeboxRepository {
+  constructor(private readonly db: Database) {}
+
+  enqueue(mediaId: string, proposerId?: string | null): JukeboxRow {
+    const id = newId("jb");
+    this.db
+      .prepare(`INSERT INTO jukebox_queue (id, media_id, proposer_id, votes, state, created_at) VALUES (?, ?, ?, 0, 'queued', ?)`)
+      .run(id, mediaId, proposerId ?? null, Date.now());
+    return this.byId(id)!;
+  }
+
+  byId(id: string): JukeboxRow | undefined {
+    return this.db.prepare(`SELECT * FROM jukebox_queue WHERE id = ?`).get(id) as JukeboxRow | undefined;
+  }
+
+  list(): JukeboxRow[] {
+    return this.db.prepare(`SELECT * FROM jukebox_queue ORDER BY votes DESC, created_at ASC`).all() as unknown as JukeboxRow[];
+  }
+
+  vote(id: string, delta = 1): void {
+    this.db.prepare(`UPDATE jukebox_queue SET votes = votes + ? WHERE id = ?`).run(delta, id);
+  }
+
+  setState(id: string, state: string): void {
+    this.db.prepare(`UPDATE jukebox_queue SET state = ? WHERE id = ?`).run(state, id);
+  }
+
+  remove(id: string): void {
+    this.db.prepare(`DELETE FROM jukebox_queue WHERE id = ?`).run(id);
   }
 }
 

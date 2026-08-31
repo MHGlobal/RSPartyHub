@@ -11,6 +11,8 @@ import { RoomManager } from "./rooms/room-manager.js";
 import { registerAllGames } from "./runtime/register-games.js";
 import { PackLibrary } from "@rs-party/content";
 import quizRushPlugin from "@rs-party/games-quiz-rush";
+import { MediaService } from "./media/media-service.js";
+import { JukeboxService } from "./jukebox/jukebox-service.js";
 import { Server as SocketServer } from "socket.io";
 import { primaryLanAddress } from "./discovery.js";
 import { join } from "node:path";
@@ -50,11 +52,14 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
     "builtin",
   );
 
+  const media = new MediaService(db, cfg.homeDir);
+  const jukebox = new JukeboxService(db);
+
   const rooms = new RoomManager(db, registry, cfg, packs);
   const rehydrated = rooms.rehydrate();
   if (rehydrated > 0) console.log(`[boot] rehydrated ${rehydrated} game session(s)`);
 
-  const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs });
+  const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs, media, jukebox });
 
   const io = new SocketServer(app.server, {
     cors: { origin: true, credentials: false },
