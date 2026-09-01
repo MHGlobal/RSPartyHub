@@ -17,6 +17,7 @@ import {
 } from "@rs-party/protocol";
 import { newId } from "@rs-party/protocol";
 import type { RoomManager } from "../rooms/room-manager.js";
+import { ChatError, type ChatService } from "../chat/chat-service.js";
 
 interface SocketSession {
   roomId: string;
@@ -51,6 +52,7 @@ export class Gateway {
   constructor(
     private readonly io: SocketServer,
     private readonly rooms: RoomManager,
+    private readonly chat?: ChatService,
   ) {
     this.mult = rooms.cfg.rateLimitMultiplier;
   }
@@ -193,6 +195,21 @@ export class Gateway {
           t0: Number(raw?.t0 ?? 0),
           serverTime: Date.now(),
         } satisfies { t0: number; serverTime: number });
+      });
+      // Chat uses the authenticated socket session; clients never provide an
+      // author ID or resume token in the event payload.
+      socket.on("chat:send", (raw, ack) => {
+        this.guarded(socket, ack, () => {
+          if (!this.chat) return { accepted: false, errorCode: "UNAVAILABLE" };
+          const s = this.session(socket)!;
+          try {
+            const message = this.chat.post(s.roomId, s.playerId, (raw as { text?: unknown } | undefined)?.text);
+            this.io.to(s.roomId).emit("chat:message", message);
+            return { accepted: true, data: { message } };
+          } catch (error) {
+            return { accepted: false, errorCode: error instanceof ChatError ? error.code : "INTERNAL" };
+          }
+        });
       });
 
       socket.on("disconnect", () => {

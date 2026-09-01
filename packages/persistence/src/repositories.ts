@@ -3,6 +3,8 @@ type SqlValue = string | number | bigint | Uint8Array | null;
 
 import type {
   AuditEventRow,
+  ChatMessageRow,
+  ChatMuteRow,
   Database,
   GameInstanceRow,
   JukeboxRow,
@@ -334,6 +336,49 @@ export class JukeboxRepository {
 
   remove(id: string): void {
     this.db.prepare(`DELETE FROM jukebox_queue WHERE id = ?`).run(id);
+  }
+}
+
+/* ---------------- Chat ---------------- */
+
+export class ChatRepository {
+  constructor(private readonly db: Database) {}
+
+  create(opts: { id: string; roomId: string; authorPlayerId: string; text: string; now: number }): ChatMessageRow {
+    this.db.prepare(
+      `INSERT INTO chat_messages (id, room_id, author_player_id, text, created_at) VALUES (?, ?, ?, ?, ?)`,
+    ).run(opts.id, opts.roomId, opts.authorPlayerId, opts.text, opts.now);
+    return this.byId(opts.id)!;
+  }
+
+  byId(id: string): ChatMessageRow | undefined {
+    return this.db.prepare(`SELECT * FROM chat_messages WHERE id = ?`).get(id) as ChatMessageRow | undefined;
+  }
+
+  list(roomId: string, limit = 50): ChatMessageRow[] {
+    return this.db.prepare(
+      `SELECT * FROM chat_messages WHERE room_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`,
+    ).all(roomId, limit).reverse() as unknown as ChatMessageRow[];
+  }
+
+  remove(id: string): void {
+    this.db.prepare(`DELETE FROM chat_messages WHERE id = ?`).run(id);
+  }
+
+  mute(roomId: string, playerId: string, mutedUntil: number | null, now: number): void {
+    this.db.prepare(
+      `INSERT INTO chat_mutes (room_id, player_id, muted_until, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)
+       ON CONFLICT(room_id, player_id) DO UPDATE SET muted_until = excluded.muted_until, updated_at = excluded.updated_at`,
+    ).run(roomId, playerId, mutedUntil, now, now);
+  }
+
+  unmute(roomId: string, playerId: string): void {
+    this.db.prepare(`DELETE FROM chat_mutes WHERE room_id = ? AND player_id = ?`).run(roomId, playerId);
+  }
+
+  muteFor(roomId: string, playerId: string): ChatMuteRow | undefined {
+    return this.db.prepare(`SELECT * FROM chat_mutes WHERE room_id = ? AND player_id = ?`).get(roomId, playerId) as ChatMuteRow | undefined;
   }
 }
 

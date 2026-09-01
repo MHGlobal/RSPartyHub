@@ -13,6 +13,7 @@ import { PackLibrary } from "@rs-party/content";
 import quizRushPlugin from "@rs-party/games-quiz-rush";
 import { MediaService } from "./media/media-service.js";
 import { JukeboxService } from "./jukebox/jukebox-service.js";
+import { ChatService } from "./chat/chat-service.js";
 import { Server as SocketServer } from "socket.io";
 import { buildJoinUrls, primaryLanAddress } from "./discovery.js";
 import { announceMdns } from "./mdns.js";
@@ -78,12 +79,13 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
 
   const media = new MediaService(db, cfg.homeDir);
   const jukebox = new JukeboxService(db);
+  const chat = new ChatService(db);
 
   const rooms = new RoomManager(db, registry, cfg, packs);
   const rehydrated = rooms.rehydrate();
   if (rehydrated > 0) console.log(`[boot] rehydrated ${rehydrated} game session(s)`);
 
-  const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs, media, jukebox });
+  const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs, media, jukebox, chat });
 
   // OWASP WS §25.4 — validate Origin against LAN allowlist when provided; LAN-only product tolerates same-origin + private IPs
   const allowedOrigins = cfg.corsAllowedOrigins;
@@ -100,7 +102,7 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
     pingTimeout: 20_000,
     maxHttpBufferSize: 64 * 1024, // spec §29.2: ~64KB max payload
   });
-  const gateway = new Gateway(io, rooms);
+  const gateway = new Gateway(io, rooms, chat);
   gateway.attach();
 
   // periodic sweep of runtimes for deadline transitions + stale disconnect marks

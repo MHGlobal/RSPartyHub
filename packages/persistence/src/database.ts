@@ -97,6 +97,22 @@ export interface JukeboxRow {
   created_at: number;
 }
 
+export interface ChatMessageRow {
+  id: string;
+  room_id: string;
+  author_player_id: string;
+  text: string;
+  created_at: number;
+}
+
+export interface ChatMuteRow {
+  room_id: string;
+  player_id: string;
+  muted_until: number | null;
+  created_at: number;
+  updated_at: number;
+}
+
 const MIGRATIONS: { version: number; up: string }[] = [
   {
     version: 1,
@@ -200,6 +216,27 @@ const MIGRATIONS: { version: number; up: string }[] = [
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_jukebox_state ON jukebox_queue(state, created_at);
+    `,
+  },
+  {
+    version: 3,
+    up: `
+      CREATE TABLE IF NOT EXISTS chat_messages (
+        id TEXT PRIMARY KEY,
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        author_player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_room_created ON chat_messages(room_id, created_at, id);
+      CREATE TABLE IF NOT EXISTS chat_mutes (
+        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+        player_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+        muted_until INTEGER,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (room_id, player_id)
+      );
     `,
   },
 ];

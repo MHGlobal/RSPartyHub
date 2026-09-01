@@ -19,6 +19,8 @@ import { registerPhotoWallRoutes } from "./photo-wall/photo-wall-routes.js";
 import type { JukeboxService } from "./jukebox/jukebox-service.js";
 import { registerI18nRoutes } from "./i18n/i18n-routes.js";
 import { registerDiagnosticsRoutes } from "./diagnostics/diagnostics-routes.js";
+import { registerChatRoutes } from "./chat/chat-routes.js";
+import { ChatService } from "./chat/chat-service.js";
 import { newToken } from "@rs-party/protocol";
 
 export interface HttpDeps {
@@ -28,6 +30,7 @@ export interface HttpDeps {
   packs: PackLibrary;
   media: MediaService;
   jukebox: JukeboxService;
+  chat?: ChatService;
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -124,6 +127,7 @@ export async function buildHttp(deps: HttpDeps) {
   registerMediaRoutes(app, { media: deps.media, adminToken: deps.adminToken });
   registerJukeboxRoutes(app, { jukebox: deps.jukebox, adminToken: deps.adminToken });
   registerPhotoWallRoutes(app, { media: deps.media, db: deps.rooms.db, adminToken: deps.adminToken });
+  registerChatRoutes(app, { rooms: deps.rooms, chat: deps.chat ?? new ChatService(deps.rooms.db), adminToken: deps.adminToken });
   registerI18nRoutes(app);
   registerDiagnosticsRoutes(app, { cfg: deps.cfg, db: deps.rooms.db, packs: deps.packs, rooms: deps.rooms, adminToken: deps.adminToken, startedAt });
 
