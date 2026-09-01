@@ -11,6 +11,13 @@ import { registerAllGames } from "../src/runtime/register-games.js";
 import { PackLibrary } from "@rs-party/content";
 import { MediaService } from "../src/media/media-service.js";
 import { JukeboxService } from "../src/jukebox/jukebox-service.js";
+import {
+  BACKUP_MAX_BYTES,
+  createBackupSerializer,
+  hasBackupCapacity,
+  selectBackupArtifactsForRemoval,
+  type BackupArtifact,
+} from "../src/diagnostics/diagnostics-routes.js";
 
 let app: Awaited<ReturnType<typeof buildHttp>>;
 let tmpHome: string;
@@ -95,6 +102,41 @@ describe("Etapa 19 — diagnostics/doctor/logs/metrics (spec §19, AC-020)", () 
     } finally {
       copied.close();
     }
+  });
+
+  it("retains the newest backup while deterministically enforcing count and byte limits", () => {
+    const artifacts: BackupArtifact[] = [
+      { filename: "rsparty-20260901000000000-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.sqlite", path: "/backup/a", bytes: 30, mtimeMs: 1 },
+      { filename: "rsparty-20260901000000001-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.sqlite", path: "/backup/b", bytes: 30, mtimeMs: 2 },
+      { filename: "rsparty-20260901000000002-cccccccccccccccccccccccccccccccc.sqlite", path: "/backup/c", bytes: 30, mtimeMs: 3 },
+    ];
+    expect(selectBackupArtifactsForRemoval(artifacts, artifacts[2]!.filename, 2, 50).map((artifact) => artifact.path))
+      .toEqual(["/backup/b", "/backup/a"]);
+    expect(selectBackupArtifactsForRemoval(artifacts, artifacts[2]!.filename, 5, BACKUP_MAX_BYTES)).toEqual([]);
+  });
+
+  it("serializes backup work and continues after a failed operation", async () => {
+    const serialize = createBackupSerializer();
+    const events: string[] = [];
+    let releaseFirst!: () => void;
+    const first = serialize(async () => {
+      events.push("first-start");
+      await new Promise<void>((resolve) => { releaseFirst = resolve; });
+      events.push("first-end");
+    });
+    const second = serialize(async () => { events.push("second"); });
+    await Promise.resolve();
+    expect(events).toEqual(["first-start"]);
+    releaseFirst();
+    await Promise.all([first, second]);
+    await expect(serialize(async () => { throw new Error("expected"); })).rejects.toThrow("expected");
+    await serialize(async () => { events.push("after-failure"); });
+    expect(events).toEqual(["first-start", "first-end", "second", "after-failure"]);
+  });
+
+  it("checks backup capacity from statfs values without touching the disk", () => {
+    expect(hasBackupCapacity({ bavail: 64 * 1024, bsize: 1024 }, 1)).toBe(true);
+    expect(hasBackupCapacity({ bavail: 1, bsize: 1024 }, 1)).toBe(false);
   });
 
   it("security headers present on diagnostics", async ()=>{
