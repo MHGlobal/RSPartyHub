@@ -123,7 +123,7 @@ export async function buildHttp(deps: HttpDeps) {
   registerPackRoutes(app, { packs: deps.packs, adminToken: deps.adminToken });
   registerMediaRoutes(app, { media: deps.media, adminToken: deps.adminToken });
   registerJukeboxRoutes(app, { jukebox: deps.jukebox, adminToken: deps.adminToken });
-  registerPhotoWallRoutes(app, { media: deps.media, db: deps.rooms.db });
+  registerPhotoWallRoutes(app, { media: deps.media, db: deps.rooms.db, adminToken: deps.adminToken });
   registerI18nRoutes(app);
   registerDiagnosticsRoutes(app, { cfg: deps.cfg, db: deps.rooms.db, packs: deps.packs, rooms: deps.rooms, adminToken: deps.adminToken, startedAt });
 

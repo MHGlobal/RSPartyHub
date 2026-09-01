@@ -1,12 +1,13 @@
 /**
  * Photo Wall routes — approved images mural with consent (spec AJ.4, §127.34).
- * MVP: list images where kind=image and consent=1; owner can withdraw consent/delete.
+ * MVP: list images where kind=image and consent=1. Consent mutations require
+ * the existing admin token until authenticated player HTTP identities exist.
  */
 import type { FastifyInstance } from "fastify";
 import type { MediaService } from "../media/media-service.js";
 import type { Database } from "@rs-party/persistence";
 
-export function registerPhotoWallRoutes(app: FastifyInstance, deps: { media: MediaService; db: Database }): void {
+export function registerPhotoWallRoutes(app: FastifyInstance, deps: { media: MediaService; db: Database; adminToken?: string }): void {
   app.get("/api/photo-wall", async () => {
     const items = deps.media.list(100);
     const photos = items.filter((r) => r.kind === "image")
@@ -22,8 +23,13 @@ export function registerPhotoWallRoutes(app: FastifyInstance, deps: { media: Med
     return { photos };
   });
 
-  // toggle consent (owner withdraw)
+  // Player identity headers are forgeable; admin auth is required until a
+  // server-validated player HTTP identity mechanism is available.
   app.post<{ Params: { id: string }; Body: { consent?: boolean } }>("/api/photo-wall/:id/consent", async (req, reply) => {
+    if (!deps.adminToken || req.headers["x-admin-token"] !== deps.adminToken) {
+      reply.code(401);
+      return { error: "UNAUTHORIZED" };
+    }
     const id = String(req.params.id);
     const row = deps.db.prepare("SELECT * FROM media_items WHERE id = ?").get(id) as { id: string; owner_player_id: string | null; consent: number } | undefined;
     if (!row) { reply.code(404); return { error: "NOT_FOUND" }; }

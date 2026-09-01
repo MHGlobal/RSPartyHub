@@ -14,6 +14,7 @@ import { JukeboxService } from "../src/jukebox/jukebox-service.js";
 let app: Awaited<ReturnType<typeof buildHttp>>;
 let tmpHome: string;
 let db: Database;
+const adminToken = "test-photo-wall-admin-token";
 
 function mp3Bytes(): Buffer {
   const b = Buffer.alloc(300);
@@ -35,7 +36,7 @@ describe("Photo Wall and Jukebox (etapa 17, spec AJ.4/AJ.5)", () => {
     const rooms = new RoomManager(db, registry, { port: 3210, host: "127.0.0.1", homeDir: tmpHome, dbFile: join(tmpHome,"data/rsparty.sqlite"), maxPlayersDefault: 12, resultsViewMs: 2000, disconnectGraceMs: 60000, rateLimitMultiplier:1 } as never, packs);
     const media = new MediaService(db, tmpHome);
     const jukebox = new JukeboxService(db);
-    app = await buildHttp({ cfg: { port: 3210, host:"127.0.0.1", homeDir: tmpHome, dbFile: join(tmpHome,"data/rsparty.sqlite"), maxPlayersDefault:12, resultsViewMs:2000, disconnectGraceMs:60000, rateLimitMultiplier:1 } as never, rooms, packs, media, jukebox });
+    app = await buildHttp({ cfg: { port: 3210, host:"127.0.0.1", homeDir: tmpHome, dbFile: join(tmpHome,"data/rsparty.sqlite"), maxPlayersDefault:12, resultsViewMs:2000, disconnectGraceMs:60000, rateLimitMultiplier:1 } as never, rooms, packs, media, jukebox, adminToken });
   });
   afterAll(async () => { await app.close(); db.close(); rmSync(tmpHome,{recursive:true, force:true}); });
 
@@ -48,9 +49,18 @@ describe("Photo Wall and Jukebox (etapa 17, spec AJ.4/AJ.5)", () => {
     expect(wall.statusCode).toBe(200);
     const j = JSON.parse(wall.body) as { photos: { id: string }[] };
     expect(j.photos.length).toBeGreaterThanOrEqual(1);
-    // withdraw consent
     const id = j.photos[0]!.id;
-    const consent = await app.inject({ method:"POST", url:`/api/photo-wall/${id}/consent`, payload:{ consent:false }});
+
+    const unauthenticated = await app.inject({ method:"POST", url:`/api/photo-wall/${id}/consent`, payload:{ consent:false }});
+    expect(unauthenticated.statusCode).toBe(401);
+    expect(JSON.parse(unauthenticated.body)).toEqual({ error: "UNAUTHORIZED" });
+
+    const forgedOwner = await app.inject({ method:"POST", url:`/api/photo-wall/${id}/consent`, headers:{ "x-player-id":"forged-owner" }, payload:{ consent:false }});
+    expect(forgedOwner.statusCode).toBe(401);
+    expect(JSON.parse(forgedOwner.body)).toEqual({ error: "UNAUTHORIZED" });
+
+    // Existing admin-token authentication remains the only mutation authority.
+    const consent = await app.inject({ method:"POST", url:`/api/photo-wall/${id}/consent`, headers:{ "x-admin-token":adminToken }, payload:{ consent:false }});
     expect(consent.statusCode).toBe(200);
     const wall2 = await app.inject({ method:"GET", url:"/api/photo-wall"});
     const j2 = JSON.parse(wall2.body) as { photos: { id: string }[] };
