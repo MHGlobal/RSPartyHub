@@ -35,6 +35,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   const corsAllowedOrigins = corsRaw
     ? corsRaw.split(",").map((s) => s.trim()).filter(Boolean)
     : undefined;
+  if (corsAllowedOrigins?.some((origin) => origin.includes("*"))) {
+    throw new Error("CORS wildcard origins are not allowed");
+  }
   return {
     port: intEnv("RS_PARTY_PORT", 3210),
     host: env.RS_PARTY_BIND ?? "0.0.0.0",

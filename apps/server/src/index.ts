@@ -24,6 +24,29 @@ export interface BootedServer {
   address?: string;
 }
 
+/** Socket.IO Origin policy; wildcard origins are deliberately never accepted. */
+export function isSocketOriginAllowed(
+  origin: string | undefined,
+  allowedOrigins: string[] | undefined,
+  port: number,
+): boolean {
+  if (!origin) return true; // same-origin / non-browser (health checks)
+  if (allowedOrigins && allowedOrigins.length > 0) return allowedOrigins.includes(origin);
+  // default: allow same LAN origins and localhost; block obvious external abuse
+  try {
+    const u = new URL(origin);
+    const host = u.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    // private IPv4 ranges (10/8, 172.16/12, 192.168/16) and .local mDNS
+    if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) || host.endsWith(".local")) return true;
+    // allow the host's own LAN candidates
+    const candidates = buildJoinUrls({ port, roomCode: "TEST" }).candidates.map((c: { address: string }) => c.address);
+    return candidates.includes(host);
+  } catch {
+    return false;
+  }
+}
+
 export async function startServer(overrides?: { dbFile?: string; port?: number }): Promise<BootedServer> {
   const cfg = loadConfig();
   if (overrides?.dbFile) cfg.dbFile = overrides.dbFile;
@@ -63,29 +86,11 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
 
   // OWASP WS §25.4 — validate Origin against LAN allowlist when provided; LAN-only product tolerates same-origin + private IPs
   const allowedOrigins = cfg.corsAllowedOrigins;
-  const isOriginAllowed = (origin: string | undefined): boolean => {
-    if (!origin) return true; // same-origin / non-browser (health checks)
-    if (allowedOrigins && allowedOrigins.length > 0) return allowedOrigins.includes(origin) || allowedOrigins.includes("*");
-    // default: allow same LAN origins and localhost; block obvious external abuse
-    try {
-      const u = new URL(origin);
-      const host = u.hostname;
-      if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
-      // private IPv4 ranges (10/8, 172.16/12, 192.168/16) and .local mDNS
-      if (/^10\./.test(host) || /^192\.168\./.test(host) || /^172\.(1[6-9]|2\d|3[0-1])\./.test(host) || host.endsWith(".local")) return true;
-      // allow the host's own LAN candidates
-      const candidates = buildJoinUrls({ port: cfg.port, roomCode: "TEST" }).candidates.map((c: { address: string }) => c.address);
-      if (candidates.includes(host)) return true;
-      return false;
-    } catch {
-      return false;
-    }
-  };
 
   const io = new SocketServer(app.server, {
     cors: {
       origin: (origin, cb) => {
-        if (isOriginAllowed(origin)) cb(null, true);
+        if (isSocketOriginAllowed(origin, allowedOrigins, cfg.port)) cb(null, true);
         else cb(new Error("CORS origin not allowed"), false);
       },
       credentials: false,
