@@ -183,6 +183,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps):
     if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
     return serializeBackup(async () => {
       let destination: ReturnType<typeof createBackupDestination> | undefined;
+      let backupCompleted = false;
       try {
         destination = createBackupDestination(deps.cfg.homeDir);
         mkdirSync(destination.directory, { recursive: true, mode: 0o700 });
@@ -197,6 +198,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps):
         deps.db.exec("PRAGMA wal_checkpoint(PASSIVE);");
         const pages = await backup(deps.db.db, destination.path);
         const bytes = statSync(destination.path).size;
+        backupCompleted = true;
         const artifacts = readdirSync(destination.directory, { withFileTypes: true })
           .filter((entry) => entry.isFile() && MANAGED_BACKUP_FILENAME.test(entry.name))
           .map((entry) => {
@@ -205,12 +207,18 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps):
             return { filename: entry.name, path, bytes: stat.size, mtimeMs: stat.mtimeMs };
           });
         // Retention runs only after SQLite has successfully finished the new artifact.
+        let retentionWarning = false;
         for (const artifact of selectBackupArtifactsForRemoval(artifacts, destination.filename)) {
-          rmSync(artifact.path, { force: true });
+          try {
+            rmSync(artifact.path, { force: true });
+          } catch {
+            // Retention cleanup must never discard an already-consistent backup.
+            retentionWarning = true;
+          }
         }
-        return { ok: true, filename: destination.filename, bytes, pages, createdAt: Date.now() };
+        return { ok: true, filename: destination.filename, bytes, pages, createdAt: Date.now(), retentionWarning };
       } catch {
-        if (destination) rmSync(destination.path, { force: true });
+        if (destination && !backupCompleted) rmSync(destination.path, { force: true });
         reply.code(500);
         return { error: "BACKUP_FAILED", message: "Não foi possível criar o backup. Tente novamente." };
       }
