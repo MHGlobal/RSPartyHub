@@ -14,6 +14,7 @@ import { JukeboxService } from "../src/jukebox/jukebox-service.js";
 let app: Awaited<ReturnType<typeof buildHttp>>;
 let tmpHome: string;
 let db: Database;
+let rooms: RoomManager;
 const adminToken = "test-photo-wall-admin-token";
 
 function mp3Bytes(): Buffer {
@@ -33,7 +34,7 @@ describe("Photo Wall and Jukebox (etapa 17, spec AJ.4/AJ.5)", () => {
     const registry = new GameRegistry();
     await registerAllGames(registry);
     const packs = new PackLibrary(join(tmpHome, "library/packs"));
-    const rooms = new RoomManager(db, registry, { port: 3210, host: "127.0.0.1", homeDir: tmpHome, dbFile: join(tmpHome,"data/rsparty.sqlite"), maxPlayersDefault: 12, resultsViewMs: 2000, disconnectGraceMs: 60000, rateLimitMultiplier:1 } as never, packs);
+    rooms = new RoomManager(db, registry, { port: 3210, host: "127.0.0.1", homeDir: tmpHome, dbFile: join(tmpHome,"data/rsparty.sqlite"), maxPlayersDefault: 12, resultsViewMs: 2000, disconnectGraceMs: 60000, rateLimitMultiplier:1 } as never, packs);
     const media = new MediaService(db, tmpHome);
     const jukebox = new JukeboxService(db);
     app = await buildHttp({ cfg: { port: 3210, host:"127.0.0.1", homeDir: tmpHome, dbFile: join(tmpHome,"data/rsparty.sqlite"), maxPlayersDefault:12, resultsViewMs:2000, disconnectGraceMs:60000, rateLimitMultiplier:1 } as never, rooms, packs, media, jukebox, adminToken });
@@ -59,12 +60,31 @@ describe("Photo Wall and Jukebox (etapa 17, spec AJ.4/AJ.5)", () => {
     expect(forgedOwner.statusCode).toBe(401);
     expect(JSON.parse(forgedOwner.body)).toEqual({ error: "UNAUTHORIZED" });
 
-    // Existing admin-token authentication remains the only mutation authority.
     const consent = await app.inject({ method:"POST", url:`/api/photo-wall/${id}/consent`, headers:{ "x-admin-token":adminToken }, payload:{ consent:false }});
     expect(consent.statusCode).toBe(200);
     const wall2 = await app.inject({ method:"GET", url:"/api/photo-wall"});
     const j2 = JSON.parse(wall2.body) as { photos: { id: string }[] };
     expect(j2.photos.find(p=>p.id===id)).toBeUndefined();
+  });
+
+  it("allows only the validated media owner or an admin to change photo consent", async () => {
+    const owner = rooms.createRoomAsHost(undefined, { nickname: "Owner", avatar: { icon: "star", bg: "blue" } }).result;
+    const intruder = rooms.join(owner.roomCode, { nickname: "Intruder", avatar: { icon: "moon", bg: "red" } });
+    const item = mediaItemForOwner(owner.playerId);
+
+    const wrongToken = await app.inject({ method: "POST", url: `/api/photo-wall/${item.id}/consent`, headers: { "x-player-id": owner.playerId, "x-resume-token": "forged-token" }, payload: { consent: false } });
+    expect(wrongToken.statusCode).toBe(403);
+    expect(JSON.parse(wrongToken.body)).toEqual({ error: "FORBIDDEN" });
+
+    const crossOwner = await app.inject({ method: "POST", url: `/api/photo-wall/${item.id}/consent`, headers: { "x-player-id": intruder.playerId, "x-resume-token": intruder.resumeToken }, payload: { consent: false } });
+    expect(crossOwner.statusCode).toBe(403);
+    expect(JSON.parse(crossOwner.body)).toEqual({ error: "FORBIDDEN" });
+
+    const ownerAllowed = await app.inject({ method: "POST", url: `/api/photo-wall/${item.id}/consent`, headers: { "x-player-id": owner.playerId, "x-resume-token": owner.resumeToken }, payload: { consent: false } });
+    expect(ownerAllowed.statusCode).toBe(200);
+
+    const adminAllowed = await app.inject({ method: "POST", url: `/api/photo-wall/${item.id}/consent`, headers: { "x-admin-token": adminToken }, payload: { consent: true } });
+    expect(adminAllowed.statusCode).toBe(200);
   });
 
   it("Jukebox enqueues only audio, votes reorder queued, host skip works", async () => {
@@ -106,3 +126,11 @@ describe("Photo Wall and Jukebox (etapa 17, spec AJ.4/AJ.5)", () => {
     // vote on skipped after host skip should be tested after forcing skip via direct service is not needed
   });
 });
+
+function mediaItemForOwner(ownerPlayerId: string): { id: string } {
+  const png = pngBytes();
+  const media = new MediaService(db, tmpHome);
+  const item = media.storeBuffer({ originalName: "owned-wall.png", claimedMime: "image/png", buffer: png });
+  db.prepare("UPDATE media_items SET owner_player_id = ? WHERE id = ?").run(ownerPlayerId, item.id);
+  return item;
+}
