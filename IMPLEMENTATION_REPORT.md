@@ -37,7 +37,7 @@ Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 | Palco anfitrião com QR + moderação | PASS | `host.html`; chave de identidade unificada |
 | Admin dashboard protegido | PASS | 401 sem token quando `RS_PARTY_ADMIN_TOKEN` definido; `/api/admin/overview` + diagnostics/doctor também protegidos |
 | Offline/LAN-first (zero CDN/fonts externas) | PASS | frontend vanilla ES-modules servido same-origin; deps npm apenas no host; CSP nosniff/Referrer/Frame |
-| Descoberta LAN + mDNS best-effort | PARTIAL | enumeração de interfaces + IP privado + QR (§6.3); mDNS NÃO implementado (spec §6.4: nunca dependente — fallback IP literal cobre o caso) |
+| Descoberta LAN + mDNS best-effort | PASS | enumeração de interfaces + IP privado + QR (§6.3); anúncio TCP `_rsparty._tcp` dinâmico, opt-out e tolerante a falhas (§6.4), com TXT sem dados privados |
 | **Etapa 15 — Content packs** | PASS | `packages/content` 7 tests: Zod schema→semantic→crossref, PackLibrary loadFromDisk/quarantine, importPackString, GET /api/packs, POST /api/admin/packs/import (422), builtin-quiz-pt injeção via settings.packId→questions em quiz-rush |
 | **Etapa 16 — Media upload + Party Drop** | PASS | MediaService 8 tests: allowlist (png/jpeg/webp/gif/mp3/ogg/wav/mp4/webm), magic-bytes sniff, ext/mime mismatch, UUID storageKey, path traversal containment, 10MB/file + 500MB quota, SHA256, sanitized name; HTTP `POST /api/media/upload` (multipart + JSON base64), `GET /api/media`, `GET /api/media/:id` (nosniff), `DELETE` admin; @fastify/multipart + CSP |
 | **Etapa 17 — Photo Wall + Jukebox** | PASS | 2 tests: Photo Wall `GET /api/photo-wall` (consent=1), `POST /:id/consent` withdraw, Jukebox `POST /api/jukebox/enqueue` só audio (422 se imagem), `GET /api/jukebox` ordenado votes, `POST /:id/vote` só queued, `POST /:id/skip` host-only (401); migr v2 jukebox_queue |
@@ -103,12 +103,11 @@ ACK devolvido no commit, antes do fan-out). No host de referência da spec §8.1
    desta VM. Cobertura funcional equivalente obtida com sockets reais + smoke HTTP + media/jukebox/i18n/diagnostics integration. Recomenda-se Playwright contexts multi-página no host de referência (spec §AV).
 2. **Latências de carga inflacionadas por hardware** (ver AW.4) — arquitetura O(n),
    ambiente O(n×custo-core).
-3. **mDNS não anunciado** — fallback por IP/QR cobre §6.4; bonjour-service fica para backlog.
-4. **Editor visual de packs (AR.2)** — import/validación via JSON API está completo e testado; editor WYSIWYG browser com autosave drafts é backlog de UX (não bloqueia spec, packs podem ser editados como JSON e validados em /api/admin/packs/import com relatório stage/errors).
-5. **ZIP pack import** — spec AR.1 prevê ZIP opcional; MVP aceita JSON direto (ZIP bomb mitigação já documentada, mas endpoint ZIP fica para hardening futuro; rejeição de ZIP é explícita).
-6. **Thumbnails / transcode** — photo wall armazena original e serve inline; thumbnail pipeline em background controlado e transcode FFmpeg são best-effort futuro (sem FFmpeg o player usa formatos browser-native, spec AJ.5/6).
-7. **WebRTC Party Drop P2P** — baseline HTTP relay está implementado e cobre LAN reliability (spec §5.4); RTCDataChannel é otimização futura, não requisito de funcionamento.
-8. **Salas em lobby puras não reidratam após restart** (só salas COM jogo ativo); GC de salas idle pendente (M1).
+3. **Editor visual de packs (AR.2)** — import/validación via JSON API está completo e testado; editor WYSIWYG browser com autosave drafts é backlog de UX (não bloqueia spec, packs podem ser editados como JSON e validados em /api/admin/packs/import com relatório stage/errors).
+4. **ZIP pack import** — spec AR.1 prevê ZIP opcional; MVP aceita JSON direto (ZIP bomb mitigação já documentada, mas endpoint ZIP fica para hardening futuro; rejeição de ZIP é explícita).
+5. **Thumbnails / transcode** — photo wall armazena original e serve inline; thumbnail pipeline em background controlado e transcode FFmpeg são best-effort futuro (sem FFmpeg o player usa formatos browser-native, spec AJ.5/6).
+6. **WebRTC Party Drop P2P** — baseline HTTP relay está implementado e cobre LAN reliability (spec §5.4); RTCDataChannel é otimização futura, não requisito de funcionamento.
+7. **Salas em lobby puras não reidratam após restart** (só salas COM jogo ativo); GC de salas idle pendente (M1).
 9. **Rate limits chat/nickname granulares** parcialmente aplicados (burst geral + join + reações + upload 2 concorrentes); alinhar restantes em hardening (M9).
 
 ## AW.7 Artifacts

@@ -8,6 +8,8 @@ export default defineConfig({
       "apps/server/test/**/*.test.ts",
     ],
     environment: "node",
+    // Unit/integration tests use injected mDNS fakes; never emit multicast in CI.
+    env: { RS_PARTY_MDNS: "false" },
     testTimeout: 15000,
     hookTimeout: 20000,
     // keep memory low on small hosts

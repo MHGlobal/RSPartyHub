@@ -18,6 +18,8 @@ export interface ServerConfig {
   rateLimitMultiplier: number;
   /** Optional CORS allowlist (comma-separated origins); empty = same-origin + LAN IPs allowed. */
   corsAllowedOrigins?: string[];
+  /** Enable the optional, best-effort `_rsparty._tcp` mDNS announcement. */
+  mdnsEnabled: boolean;
   logLevel: string;
 }
 
@@ -26,6 +28,12 @@ function intEnv(name: string, fallback: number): number {
   if (!v) return fallback;
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function boolEnv(env: NodeJS.ProcessEnv, name: string, fallback: boolean): boolean {
+  const value = env[name]?.trim().toLowerCase();
+  if (!value) return fallback;
+  return !["0", "false", "no", "off"].includes(value);
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
@@ -50,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     disconnectGraceMs: intEnv("RS_PARTY_DISCONNECT_GRACE_MS", 60_000),
     rateLimitMultiplier: intEnv("RS_PARTY_RATE_MULT", 1),
     corsAllowedOrigins,
+    mdnsEnabled: boolEnv(env, "RS_PARTY_MDNS", true),
     logLevel: env.RS_PARTY_LOG_LEVEL ?? env.LOG_LEVEL ?? "info",
   };
 }

@@ -15,6 +15,7 @@ import { MediaService } from "./media/media-service.js";
 import { JukeboxService } from "./jukebox/jukebox-service.js";
 import { Server as SocketServer } from "socket.io";
 import { buildJoinUrls, primaryLanAddress } from "./discovery.js";
+import { announceMdns } from "./mdns.js";
 import { join } from "node:path";
 
 export interface BootedServer {
@@ -109,21 +110,27 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
 
   await app.listen({ port: cfg.port, host: cfg.host });
   const bound = app.addresses()[0];
+  const boundPort = bound && typeof bound === "object" ? bound.port : cfg.port;
   const address =
     bound && typeof bound === "object"
       ? `http://${bound.address === "::" ? "127.0.0.1" : bound.address}:${bound.port}`
       : undefined;
 
+  // This is deliberately after HTTP bind and failure-tolerant: mDNS can never
+  // block startup or the literal-IP/QR LAN join fallback.
+  const mdns = await announceMdns({ enabled: cfg.mdnsEnabled, port: boundPort });
+
   const lan = primaryLanAddress();
   console.log(`\n  RS Party Hub`);
-  console.log(`  ├─ local : http://localhost:${cfg.port}`);
-  console.log(`  └─ LAN   : http://${lan ?? "<sem-rede>"}:${cfg.port}\n`);
+  console.log(`  ├─ local : http://localhost:${boundPort}`);
+  console.log(`  └─ LAN   : http://${lan ?? "<sem-rede>"}:${boundPort}\n`);
 
   return {
-    port: cfg.port,
+    port: boundPort,
     address,
     async close() {
       for (const room of rooms.listActiveRooms()) room.game?.runtime.finishEarly();
+      mdns.close();
       await io.close();
       await app.close();
       db.close();
