@@ -78,6 +78,7 @@ Ver `.env.example`. Diretório de dados: `RS_PARTY_HOME` (default `./.rs-party-h
 ## Documentação adicional
 
 - `IMPLEMENTATION_REPORT.md` — evidências reais de implementação, testes e carga
+- `docs/SPEC_GAP_MATRIX.md` — matriz factual de requisitos, lacunas e gates de release (não é declaração de conclusão)
 - `CHANGELOG.md` — histórico de versões
 - `SECURITY.md` + `docs/NETWORKING.md` + `docs/TROUBLESHOOTING.md` — hardening, rede e diagnóstico
 - `docs/adr/` — 8 ADRs (autoridade, Socket.IO, SQLite, frontend, LAN core, same-origin, WebRTC opcional, plugin engine)
