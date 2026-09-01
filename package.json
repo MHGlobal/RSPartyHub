@@ -12,6 +12,7 @@
     "build": "pnpm -r --workspace-concurrency=1 run build",
     "typecheck": "pnpm -r --workspace-concurrency=1 run typecheck",
     "test": "vitest run",
+    "test:headless": "vitest run",
     "test:watch": "vitest",
     "test:load": "vitest run --config vitest.load.config.ts",
     "verify": "pnpm typecheck && pnpm test",
