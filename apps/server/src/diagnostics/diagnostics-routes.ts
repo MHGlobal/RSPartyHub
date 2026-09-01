@@ -9,8 +9,10 @@ import type { Database } from "@rs-party/persistence";
 import type { PackLibrary } from "@rs-party/content";
 import type { RoomManager } from "../rooms/room-manager.js";
 import { lanCandidates as enumerateLanCandidates, primaryLanAddress } from "../discovery.js";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { backup } from "node:sqlite";
+import { existsSync, mkdirSync, rmSync, statSync } from "node:fs";
+import { join, resolve, sep } from "node:path";
+import { randomUUID } from "node:crypto";
 
 export interface DiagDeps {
   cfg: ServerConfig;
@@ -19,6 +21,22 @@ export interface DiagDeps {
   rooms: RoomManager;
   adminToken?: string;
   startedAt: number;
+}
+
+const BACKUP_FILENAME_MAX_LENGTH = 80;
+
+function createBackupDestination(homeDir: string): { directory: string; filename: string; path: string } {
+  const directory = resolve(homeDir, "backups");
+  // Fixed-format UTC time plus a UUID makes collisions impractical while keeping
+  // the externally visible filename portable and bounded.
+  const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "");
+  const filename = `rsparty-${timestamp}-${randomUUID().replace(/-/g, "")}.sqlite`;
+  if (!/^[a-z0-9-]+\.sqlite$/.test(filename) || filename.length > BACKUP_FILENAME_MAX_LENGTH) {
+    throw new Error("invalid backup filename");
+  }
+  const path = resolve(directory, filename);
+  if (!path.startsWith(`${directory}${sep}`)) throw new Error("invalid backup destination");
+  return { directory, filename, path };
 }
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps): void {
@@ -96,12 +114,25 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps):
     };
   });
 
-  // backup stub — produce metadata only (spec 180.18)
+  // SQLite online backup API creates a transactionally consistent artifact even
+  // while the WAL-backed source connection remains open.
   app.post("/api/admin/backups", async (req, reply) => {
     if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }
-    // verify DB file exists and is readable; real backup would copy file
-    const exists = existsSync(deps.cfg.dbFile);
-    return { ok: exists, dbFile: deps.cfg.dbFile, at: Date.now(), note: "MVP: backup metadata only — copia o ficheiro sqlite enquanto servidor parado para restauro completo" };
+    let destination: ReturnType<typeof createBackupDestination> | undefined;
+    try {
+      destination = createBackupDestination(deps.cfg.homeDir);
+      mkdirSync(destination.directory, { recursive: true, mode: 0o700 });
+      // PASSIVE does not block active readers/writers; backup() then performs
+      // SQLite's safe online copy rather than copying a potentially stale main file.
+      deps.db.exec("PRAGMA wal_checkpoint(PASSIVE);");
+      const pages = await backup(deps.db.db, destination.path);
+      const bytes = statSync(destination.path).size;
+      return { ok: true, filename: destination.filename, bytes, pages, createdAt: Date.now() };
+    } catch {
+      if (destination) rmSync(destination.path, { force: true });
+      reply.code(500);
+      return { error: "BACKUP_FAILED" };
+    }
   });
   // spec §180.19-20 aliases — validate/restore stubs (MVP: backup is file copy)
   const restoreValidate = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {

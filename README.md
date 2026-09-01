@@ -4,12 +4,12 @@
 
 Plataforma local-first de party games: um PC anfitrião serve a aplicação pela rede local; os telemóveis dos jogadores tornam-se controladores privados via navegador — sem contas, sem Internet, sem instalação.
 
-![status](https://img.shields.io/badge/testes-140%2F140-brightgreen) ![stack](https://img.shields.io/badge/Node-22.13%2B-blue)
+![status](https://img.shields.io/badge/testes-140%2F140-brightgreen) ![stack](https://img.shields.io/badge/Node-22.16%2B-blue)
 
 ## Arranque rápido
 
 ```bash
-# requisitos: Node.js >= 22.13, corepack (incluído no Node)
+# requisitos: Node.js >= 22.16, corepack (incluído no Node)
 corepack enable
 pnpm install
 

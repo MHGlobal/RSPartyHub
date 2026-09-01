@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { buildHttp } from "../src/http.js";
 import { Database } from "@rs-party/persistence";
 import { RoomManager } from "../src/rooms/room-manager.js";
@@ -61,11 +62,39 @@ describe("Etapa 19 — diagnostics/doctor/logs/metrics (spec §19, AC-020)", () 
     expect(noAuth.statusCode).toBe(401);
   });
 
-  it("POST /api/admin/backups returns metadata", async ()=>{
+  it("POST /api/admin/backups requires admin authentication", async ()=>{
+    const backupDirectory = join(tmpHome, "backups");
+    expect(existsSync(backupDirectory)).toBe(false);
+    const noAuth = await app.inject({ method:"POST", url:"/api/admin/backups" });
+    const wrongAuth = await app.inject({ method:"POST", url:"/api/admin/backups", headers:{ "x-admin-token": "wrong" }});
+    expect(noAuth.statusCode).toBe(401);
+    expect(wrongAuth.statusCode).toBe(401);
+    expect(existsSync(backupDirectory)).toBe(false);
+  });
+
+  it("POST /api/admin/backups creates a safe, consistent SQLite artifact", async ()=>{
+    const marker = "backup-integrity-marker";
+    db.prepare("INSERT INTO kv (key, value) VALUES (?, ?)").run("backup-test", marker);
     const r = await app.inject({ method:"POST", url:"/api/admin/backups", headers:{ "x-admin-token": adminToken }});
     expect(r.statusCode).toBe(200);
-    const j = JSON.parse(r.body) as { ok:boolean; dbFile:string };
-    expect(typeof j.dbFile).toBe("string");
+    const j = JSON.parse(r.body) as { ok:boolean; filename:string; bytes:number; pages:number; createdAt:number };
+    expect(j.ok).toBe(true);
+    expect(j.filename).toMatch(/^rsparty-\d{17}-[a-f0-9]{32}\.sqlite$/);
+    expect(j.filename.length).toBeLessThanOrEqual(80);
+    expect(j.filename).not.toContain("/");
+    expect(j.bytes).toBeGreaterThan(0);
+    expect(j.pages).toBeGreaterThan(0);
+    expect(r.body).not.toContain(tmpHome);
+
+    const artifact = join(tmpHome, "backups", j.filename);
+    expect(statSync(artifact).size).toBe(j.bytes);
+    const copied = new DatabaseSync(artifact, { readOnly: true });
+    try {
+      expect(copied.prepare("SELECT value FROM kv WHERE key = ?").get("backup-test")).toEqual({ value: marker });
+      expect(copied.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+    } finally {
+      copied.close();
+    }
   });
 
   it("security headers present on diagnostics", async ()=>{

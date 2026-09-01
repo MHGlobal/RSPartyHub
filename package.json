@@ -5,7 +5,7 @@
   "description": "RS Party Hub \u2014 local-first multiplayer party platform over LAN/hotspot",
   "type": "module",
   "engines": {
-    "node": ">=22.13.0"
+    "node": ">=22.16.0"
   },
   "packageManager": "pnpm@10.34.5",
   "scripts": {
