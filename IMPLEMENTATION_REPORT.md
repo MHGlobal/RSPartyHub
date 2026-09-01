@@ -47,7 +47,7 @@ Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 | **Etapa 21 — Chaos/Load** | PASS | `chaos.test.ts` 3: duplicate idempotência, disconnect/resume, restart rehydrate; `vitest.load.config.ts` 30 clientes quiz-rush burst |
 | **Etapa 22 — Packaging** | PASS | `Dockerfile` + `docker-compose.yml` + `.dockerignore` + `start.sh`/`start.bat` + `HEALTHCHECK`; `pnpm verify` + `scripts/verify.sh` |
 | **Etapa 23 — Docs/ADRs** | PASS | 8 ADRs (`docs/adr/`), `SECURITY.md`, `docs/NETWORKING.md`, `docs/TROUBLESHOOTING.md`, `.env.example` com `LOG_LEVEL/CORS/HOSTNAME` |
-| **Etapa 24 — Verify** | PASS | `scripts/verify.sh` + `pnpm verify` (typecheck+test) executado; `tsc --noEmit` limpo, 140/140 verdes |
+| **Etapa 24 — Verify** | PASS | `scripts/verify.sh` + `pnpm verify` (typecheck+test) executado; `tsc --noEmit` limpo, 150/150 verdes |
 
 ## AW.3 Tests
 
@@ -63,7 +63,7 @@ Relatório de fatos reais conforme Apêndice AW da spec. Sem marketing.
 | Diagnostics/Doctor | `apps/server/test/diagnostics.test.ts` | 5/5 |
 | Security | `apps/server/test/security.test.ts` | 5/5 (XSS, traversal, CSP, admin, rate-limit) |
 | Chaos | `apps/server/test/chaos.test.ts` | 3/3 (duplicate, resume, rehydrate) |
-| **Total default** | `pnpm vitest run` | **140/140 em ~45 s** (21 ficheiros) |
+| **Total default** | `pnpm vitest run` | **150/150 em ~115 s** (22 ficheiros) |
 | Typecheck | `pnpm -r exec tsc --noEmit` | limpo (server + 15 pacotes) |
 | Falhas corrigidas durante o desenvolvimento | — | gateway role coercion (C1), runtime órfão no return-to-lobby (H1), resume do play.html (H2), eventId sem bound (H3), broadcast O(n²) → coalescido, port=0 falsy, FK/instanceId mismatch, doctor CLI Node24 strip-types → scripts/doctor.mjs standalone, jukebox import missing newId |
 

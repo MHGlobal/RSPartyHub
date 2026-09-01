@@ -13,7 +13,7 @@ versão inicial segue [Semantic Versioning](https://semver.org/lang/pt-PT/).
 - Aliases §180: `GET /api/network`, `/api/v1/network`, `/api/v1/games`, `/api/games/:pluginId`, `/api/v1/admin/diagnostics|doctor|metrics|restore`, `/api/v1/health`; `GET /api/rooms` stub; Doctor checks expandidos (Node, ffmpeg hint, clock, mDNS, firewall, WebSocket).
 
 ### Changed
-- `http.ts` CSP hardening + headers; `index.ts` CORS validação LAN privada + localhost + allowlist; `doctor.ts` + `diagnostics-routes.ts` expandidos; total **140/140** testes verdes.
+- `http.ts` CSP hardening + headers; `index.ts` CORS validação LAN privada + localhost + allowlist; `doctor.ts` + `diagnostics-routes.ts` expandidos; total **150/150** testes verdes.
 
 ## [0.2.0] — 2026-08-31 — Etapas 15→19 completas (100% spec P0 + hardening)
 
