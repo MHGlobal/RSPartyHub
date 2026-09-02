@@ -29,9 +29,9 @@ export class RoomRepository {
     this.db
       .prepare(
         `INSERT INTO rooms (id, code, status, host_player_id, locked, max_players, settings_json, current_game_id, state_version, created_at, updated_at)
-         VALUES (?, ?, 'lobby', NULL, 0, ?, '{}', NULL, 1, ?, ?)`,
+         VALUES (?, ?, 'lobby', NULL, 0, ?, ?, NULL, 1, ?, ?)`,
       )
-      .run(opts.id, opts.code, opts.maxPlayers, opts.now, opts.now);
+      .run(opts.id, opts.code, opts.maxPlayers, JSON.stringify(opts.settings ?? {}), opts.now, opts.now);
     return this.byId(opts.id)!;
   }
 
@@ -81,6 +81,50 @@ export class RoomRepository {
       .prepare(`SELECT COUNT(*) AS c FROM rooms WHERE status != 'closed'`)
       .get() as { c: number };
     return Number(r.c);
+  }
+
+  /** Record room activity without changing its externally visible state. */
+  touch(id: string, now = Date.now()): void {
+    this.db.prepare(`UPDATE rooms SET updated_at = ? WHERE id = ?`).run(now, id);
+  }
+
+  /**
+   * Remove an expired idle lobby and all data owned by it.  The status and
+   * current-game predicates are repeated inside the transaction so a caller
+   * can never purge a room that became active after it was selected.
+   */
+  purgeIdleLobby(id: string, cutoff: number): string[] {
+    const eligible = this.db.prepare(
+      `SELECT id FROM rooms
+       WHERE id = ? AND status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?`,
+    ).get(id, cutoff);
+    if (!eligible) return [];
+
+    const media = this.db.prepare(`SELECT storage_key FROM media_items WHERE room_id = ?`)
+      .all(id) as Array<{ storage_key: string }>;
+    this.db.exec("BEGIN");
+    try {
+      // Delete dependants explicitly: original v1 foreign keys predate CASCADE.
+      this.db.prepare(`DELETE FROM chat_mutes WHERE room_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM chat_messages WHERE room_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM game_instances WHERE room_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM media_items WHERE room_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM players WHERE room_id = ?`).run(id);
+      this.db.prepare(`DELETE FROM audit_events WHERE room_id = ?`).run(id);
+      const result = this.db.prepare(
+        `DELETE FROM rooms
+         WHERE id = ? AND status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?`,
+      ).run(id, cutoff);
+      if (Number(result.changes) !== 1) {
+        this.db.exec("ROLLBACK");
+        return [];
+      }
+      this.db.exec("COMMIT");
+      return media.map((row) => row.storage_key);
+    } catch (err) {
+      this.db.exec("ROLLBACK");
+      throw err;
+    }
   }
 }
 

@@ -83,7 +83,7 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
 
   const rooms = new RoomManager(db, registry, cfg, packs);
   const rehydrated = rooms.rehydrate();
-  if (rehydrated > 0) console.log(`[boot] rehydrated ${rehydrated} game session(s)`);
+  if (rehydrated > 0) console.log(`[boot] rehydrated ${rehydrated} room(s)`);
 
   const app = await buildHttp({ cfg, rooms, adminToken: cfg.adminToken, packs, media, jukebox, chat });
 
@@ -106,9 +106,12 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
   gateway.attach();
 
   // periodic sweep of runtimes for deadline transitions + stale disconnect marks
-  setInterval(() => {
+  const runtimeSweepTimer = setInterval(() => {
     for (const room of rooms.listActiveRooms()) room.game?.runtime.sweep();
-  }, 1000).unref();
+  }, 1000);
+  runtimeSweepTimer.unref();
+  const idleRoomSweepTimer = setInterval(() => rooms.sweepIdleRooms(), 60_000);
+  idleRoomSweepTimer.unref();
 
   await app.listen({ port: cfg.port, host: cfg.host });
   const bound = app.addresses()[0];
@@ -131,7 +134,9 @@ export async function startServer(overrides?: { dbFile?: string; port?: number }
     port: boundPort,
     address,
     async close() {
-      for (const room of rooms.listActiveRooms()) room.game?.runtime.finishEarly();
+      clearInterval(runtimeSweepTimer);
+      clearInterval(idleRoomSweepTimer);
+      rooms.dispose();
       mdns.close();
       await io.close();
       await app.close();

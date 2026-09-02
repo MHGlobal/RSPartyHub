@@ -239,6 +239,14 @@ const MIGRATIONS: { version: number; up: string }[] = [
       );
     `,
   },
+  {
+    // Keeps expired-lobby collection bounded as room history grows.
+    version: 4,
+    up: `
+      CREATE INDEX IF NOT EXISTS idx_rooms_idle_lobby
+        ON rooms(status, current_game_id, updated_at);
+    `,
+  },
 ];
 
 export class Database {

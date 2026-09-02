@@ -14,6 +14,8 @@ export interface ServerConfig {
   maxPlayersDefault: number;
   resultsViewMs: number;
   disconnectGraceMs: number;
+  /** Idle lobby TTL; zero disables automatic expiry. */
+  roomIdleTtlMs: number;
   /** Multiplier for rate limits; >1 only in tests/load runs. */
   rateLimitMultiplier: number;
   /** Optional CORS allowlist (comma-separated origins); empty = same-origin + LAN IPs allowed. */
@@ -56,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     maxPlayersDefault: intEnv("RS_PARTY_MAX_PLAYERS", 12),
     resultsViewMs: intEnv("RS_PARTY_RESULTS_MS", 8000),
     disconnectGraceMs: intEnv("RS_PARTY_DISCONNECT_GRACE_MS", 60_000),
+    roomIdleTtlMs: Math.max(0, intEnv("RS_PARTY_ROOM_IDLE_TTL_MS", 24 * 60 * 60 * 1000)),
     rateLimitMultiplier: intEnv("RS_PARTY_RATE_MULT", 1),
     corsAllowedOrigins,
     mdnsEnabled: boolEnv(env, "RS_PARTY_MDNS", true),

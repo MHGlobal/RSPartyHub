@@ -26,6 +26,8 @@ import { GameRuntime } from "../runtime/game-runtime.js";
 import type { PackLibrary } from "@rs-party/content";
 import type { GameSettingsValues } from "@rs-party/game-engine";
 import type { ServerConfig } from "../config.js";
+import { unlinkSync } from "node:fs";
+import { basename, resolve } from "node:path";
 
 export interface JoinInput {
   nickname: string;
@@ -66,6 +68,7 @@ export interface MemRoom {
   locked: boolean;
   maxPlayers: number;
   reactionsMuted: boolean;
+  settings: Record<string, unknown>;
   serverSeq: number;
   stateVersion: number;
   players: Map<string, MemPlayer>;
@@ -109,7 +112,7 @@ export class RoomManager {
 
   /* ---------------- lifecycle ---------------- */
 
-  createRoom(maxPlayers?: number): MemRoom {
+  createRoom(maxPlayers?: number, settings?: Record<string, unknown>): MemRoom {
     let code = generateRoomCode();
     while (this.roomRepo.activeByCode(code)) code = generateRoomCode();
     const id = newId("room");
@@ -117,6 +120,7 @@ export class RoomManager {
       id,
       code,
       maxPlayers: maxPlayers ?? this.cfg.maxPlayersDefault,
+      settings,
       now: Date.now(),
     });
     const mem: MemRoom = {
@@ -126,6 +130,7 @@ export class RoomManager {
       locked: false,
       maxPlayers: row.max_players,
       reactionsMuted: false,
+      settings: rowSettings(row.settings_json),
       serverSeq: 0,
       stateVersion: 1,
       players: new Map(),
@@ -145,21 +150,23 @@ export class RoomManager {
       code: string;
       locked: number;
       max_players: number;
+      status: MemRoom["phase"];
       current_game_id: string | null;
       settings_json: string;
+      state_version: number;
     }>;
     let n = 0;
     for (const row of rows) {
-      if (!row.current_game_id) continue;
       const mem: MemRoom = {
         id: row.id,
         code: row.code,
-        phase: "lobby",
+        phase: row.current_game_id ? "lobby" : row.status,
         locked: !!row.locked,
         maxPlayers: row.max_players,
         reactionsMuted: false,
+        settings: rowSettings(row.settings_json),
         serverSeq: 0,
-        stateVersion: 1,
+        stateVersion: row.state_version,
         players: new Map(),
         announcements: [],
       };
@@ -174,7 +181,7 @@ export class RoomManager {
           avatar: { icon: pr.avatar_icon, bg: pr.avatar_bg },
           role: pr.role as MemPlayer["role"],
           connected: false,
-          ready: false,
+          ready: !!pr.ready,
           score: pr.score,
           kicked: false,
           lastSeenAt: pr.last_seen_at,
@@ -182,16 +189,16 @@ export class RoomManager {
       }
       this.rooms.set(mem.id, mem);
       // restart persisted game instance so its state is not lost
-      const inst = this.gameRepo.byId(row.current_game_id);
+      const inst = row.current_game_id ? this.gameRepo.byId(row.current_game_id) : undefined;
       if (inst && !inst.ended_at && this.registry.get(inst.plugin_id)) {
         try {
           this.attachRuntime(mem, inst.plugin_id, inst.id);
-          n++;
         } catch {
           // corrupt instance: drop back to lobby rather than crash boot
           this.gameRepo.update(inst.id, { ended_at: Date.now() });
         }
       }
+      n++;
     }
     return n;
   }
@@ -218,6 +225,40 @@ export class RoomManager {
     this.roomRepo.update(room.id, { status: "closed" });
     this.audit.append({ category: "room", eventType: "room.closed", roomId: room.id });
     this.rooms.delete(room.id);
+  }
+
+  /** Stop all runtime timers without altering durable room/game state. */
+  dispose(): void {
+    for (const room of this.rooms.values()) room.game?.runtime.dispose();
+  }
+
+  /** Explicit idle sweep, also usable deterministically by tests. */
+  sweepIdleRooms(now = Date.now()): number {
+    if (this.cfg.roomIdleTtlMs <= 0) return 0;
+    const cutoff = now - this.cfg.roomIdleTtlMs;
+    const candidates = this.db.prepare(
+      `SELECT id FROM rooms
+       WHERE status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?`,
+    ).all(cutoff) as Array<{ id: string }>;
+    let swept = 0;
+    for (const { id } of candidates) {
+      const room = this.rooms.get(id);
+      // Do not rely only on persisted state to protect live game runtimes.
+      if (room && (room.phase !== "lobby" || room.game)) continue;
+      const storageKeys = this.roomRepo.purgeIdleLobby(id, cutoff);
+      if (storageKeys.length === 0 && this.roomRepo.byId(id)) continue;
+      this.rooms.delete(id);
+      for (const storageKey of storageKeys) this.removeOwnedUpload(storageKey);
+      swept++;
+    }
+    return swept;
+  }
+
+  private removeOwnedUpload(storageKey: string): void {
+    const uploadsDir = resolve(this.cfg.homeDir, "uploads", "approved");
+    const path = resolve(uploadsDir, basename(storageKey));
+    if (path === uploadsDir || !path.startsWith(`${uploadsDir}/`)) return;
+    try { unlinkSync(path); } catch { /* best-effort after durable DB cleanup */ }
   }
 
   /* ---------------- join / resume ---------------- */
@@ -295,6 +336,8 @@ export class RoomManager {
       throw joinErr("FORBIDDEN", "resume token mismatch");
     }
     mem.lastSeenAt = Date.now();
+    this.playerRepo.update(playerId, { last_seen_at: mem.lastSeenAt });
+    this.roomRepo.touch(room.id, mem.lastSeenAt);
     return { roomCode: room.code, playerId, resumeToken: token, role: mem.role };
   }
 
@@ -309,8 +352,12 @@ export class RoomManager {
   }
 
   touch(roomId: string, playerId: string): void {
-    const p = this.rooms.get(roomId)?.players.get(playerId);
-    if (p) p.lastSeenAt = Date.now();
+    const room = this.rooms.get(roomId);
+    const p = room?.players.get(playerId);
+    if (!p || !room) return;
+    p.lastSeenAt = Date.now();
+    this.playerRepo.update(playerId, { last_seen_at: p.lastSeenAt });
+    this.roomRepo.touch(room.id, p.lastSeenAt);
   }
 
   /* ---------------- lobby actions ---------------- */
@@ -602,6 +649,7 @@ export class RoomManager {
       now: Date.now(),
     });
     this.roomRepo.update(room.id, { host_player_id: playerId });
+    this.playerRepo.update(playerId, { ready: 1 });
     this.bumpVersion(room);
     return {
       room,
@@ -614,6 +662,7 @@ export class RoomManager {
   bumpVersion(room: MemRoom): void {
     room.serverSeq++;
     room.stateVersion++;
+    this.roomRepo.update(room.id, { state_version: room.stateVersion });
   }
 
   /**
@@ -752,4 +801,15 @@ function shuffleDeterministic<T>(arr: T[], seed: number): T[] {
 
 function SeededRandomSeed(): number {
   return globalThis.crypto.getRandomValues(new Uint32Array(1))[0]! >>> 0;
+}
+
+function rowSettings(settingsJson: string): Record<string, unknown> {
+  try {
+    const value: unknown = JSON.parse(settingsJson);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as Record<string, unknown>
+      : {};
+  } catch {
+    return {};
+  }
 }
