@@ -88,19 +88,23 @@
 
     function wire(s) {
       const ind = el("conn-indicator");
+      const connected = () => {
+        ind.textContent = "ligado"; ind.className = "conn-badge ok";
+        el("reconnect-banner").classList.remove("show");
+        requestSnapshot(s);
+      };
       s.on("disconnect", () => {
         ind.textContent = "a reconectar…"; ind.className = "conn-badge bad";
         el("reconnect-banner").classList.add("show");
       });
-      s.on("connect", () => {
-        ind.textContent = "ligado"; ind.className = "conn-badge ok";
-        el("reconnect-banner").classList.remove("show");
-        requestSnapshot(s);
-      });
+      s.on("connect", connected);
       onSnapshot(s, (snapshot) => { snap = snapshot; render(); });
       s.on("announce", (m) => flyReaction(m.kind));
       syncClock(s, (o) => { offsetMs = o; });
       renderReactionsBar();
+      // connectAndAuth resolves after Socket.IO's initial connect event; do not
+      // leave the controller looking offline when listeners are registered late.
+      if (s.connected) connected();
     }
 
     /* ---------- rendering ---------- */

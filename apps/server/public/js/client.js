@@ -95,7 +95,10 @@ export function syncClock(socket, onOffset) {
   setInterval(sample, 20_000);
 }
 
-export function el(sel) { return document.querySelector(sel); }
+/** Resolve legacy bare IDs as well as normal CSS selectors. */
+export function el(sel) {
+  return document.getElementById(sel) ?? document.querySelector(sel);
+}
 export function h(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {

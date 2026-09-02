@@ -2,7 +2,7 @@
   "name": "rs-party-hub",
   "version": "0.3.0",
   "private": true,
-  "description": "RS Party Hub \u2014 local-first multiplayer party platform over LAN/hotspot",
+  "description": "RS Party Hub — local-first multiplayer party platform over LAN/hotspot",
   "type": "module",
   "engines": {
     "node": ">=22.16.0"
@@ -13,6 +13,7 @@
     "typecheck": "pnpm -r --workspace-concurrency=1 run typecheck",
     "test": "vitest run",
     "test:headless": "vitest run",
+    "test:e2e": "playwright test",
     "test:watch": "vitest",
     "test:load": "vitest run --config vitest.load.config.ts",
     "verify": "pnpm typecheck && pnpm test",
@@ -22,6 +23,7 @@
     "doctor": "pnpm --filter @rs-party/server doctor"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@types/node": "^22.13.0",
     "@types/qrcode": "^1.5.6",
     "socket.io-client": "^4.8.3",

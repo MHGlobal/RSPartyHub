@@ -51,6 +51,13 @@ export async function buildHttp(deps: HttpDeps) {
     decorateReply: true,
   });
 
+  // Public navigation uses extensionless LAN-friendly URLs while the static
+  // files retain their explicit names on disk.
+  app.get("/host", async (_req, reply) => reply.sendFile("host.html"));
+  app.get("/play", async (_req, reply) => reply.sendFile("play.html"));
+  app.get("/admin", async (_req, reply) => reply.sendFile("admin.html"));
+  app.get("/join/:roomCode", async (_req, reply) => reply.sendFile("index.html"));
+
   app.get("/healthz", async () => ({ ok: true }));
   app.get("/api/health", async () => ({ ok: true }));
   app.get("/api/v1/health", async () => ({ ok: true }));
@@ -138,8 +145,10 @@ export async function buildHttp(deps: HttpDeps) {
     reply.header("X-Frame-Options", "SAMEORIGIN");
     reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     reply.header("X-Powered-By", "RS Party Hub");
-    // CSP hardened: no object, base-uri self, frame-ancestors self; unsafe-inline for styles only (host UI)
-    reply.header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ws: wss:; frame-ancestors 'self'");
+    // The browser UI currently contains same-origin inline ES modules. Permit
+    // those modules until they are moved to external files; all network and
+    // object/frame restrictions remain enforced.
+    reply.header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-ancestors 'self'");
     reply.header("Cache-Control", "no-store");
   });
 

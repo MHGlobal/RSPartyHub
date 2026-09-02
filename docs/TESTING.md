@@ -1,27 +1,30 @@
 # Testes
 
-## Ambiente com poucos recursos
+## Suites
 
-Este projeto executa a validação automatizada de forma headless, sem automação de
-browser. Em particular, **Playwright não está configurado, instalado ou executado**
-neste repositório enquanto o ambiente de execução estiver limitado a 1 GB de RAM.
+O projeto tem validação unitária/integração via Vitest e E2E real de browser com
+Playwright Chromium. O comando E2E inicia o servidor local numa porta dedicada e
+exerce a aplicação através de contextos de browser isolados.
 
 Execute a suite suportada com:
 
 ```bash
 pnpm test:headless
 pnpm typecheck
+pnpm test:e2e
 ```
 
-`pnpm verify` combina ambos os comandos.
+`pnpm verify` combina typecheck e Vitest; execute `pnpm test:e2e` separadamente
+para a validação do browser.
 
-## Limite de cobertura atual
+## Cobertura E2E atual
 
-Os testes cobrem o servidor, protocolo e motores de jogo através de Vitest e
-clientes Socket.IO. Eles não são E2E de interface: não criam contextos de browser
-isolados e não validam fluxos visuais de anfitrião/jogador, refresh/reconexão de
-browser ou a UI de sala inválida.
+`e2e/party-flow.spec.ts` corre somente em Chromium e cobre:
 
-Não deve ser declarado que Chromium, Firefox ou WebKit passaram testes E2E. Uma
-base E2E real para estes cenários exige uma decisão posterior para permitir uma
-ferramenta de browser e recursos suficientes para a executar.
+- criação de sala pelo anfitrião;
+- entrada de jogador a partir de um contexto isolado;
+- feedback para uma sala inexistente;
+- refresh do jogador com retoma da identidade, sem criar duplicado.
+
+O servidor E2E usa `RS_PARTY_HOME=.rs-party-e2e`, porta `3211` e mDNS desligado;
+os seus dados são descartáveis e não são usados pela execução normal.

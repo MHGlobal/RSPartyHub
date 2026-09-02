@@ -258,6 +258,7 @@
           });
         }
       });
+      s.on("connect_error", (err) => fatal(`Falha ao ligar ao servidor: ${err.message}`));
       wire(s);
     }
 

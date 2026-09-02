@@ -62,6 +62,7 @@ Princípios (spec): servidor autoritativo; aleatoriedade só seeded no servidor;
 ```bash
 pnpm test                                   # suite completa (vitest)
 pnpm test:headless                          # validação sem browser (adequada a VMs com pouca RAM)
+pnpm test:e2e                               # fluxos reais de UI em Chromium via Playwright
 pnpm verify                                 # typecheck + test (CI gate)
 pnpm -r typecheck                           # tsc --noEmit em todos os pacotes
 pnpm test:load                              # simulação de carga (30 clientes)
@@ -78,7 +79,7 @@ Ver `.env.example`. Diretório de dados: `RS_PARTY_HOME` (default `./.rs-party-h
 
 ## Documentação adicional
 
-- `docs/TESTING.md` — contrato de testes e limitação deliberada de E2E de browser
+- `docs/TESTING.md` — suites Vitest e E2E Chromium efetivamente executadas
 - `IMPLEMENTATION_REPORT.md` — evidências reais de implementação, testes e carga
 - `docs/SPEC_GAP_MATRIX.md` — matriz factual de requisitos, lacunas e gates de release (não é declaração de conclusão)
 - `CHANGELOG.md` — histórico de versões
