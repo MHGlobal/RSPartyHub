@@ -96,7 +96,10 @@ export class RoomRepository {
   purgeIdleLobby(id: string, cutoff: number): string[] {
     const eligible = this.db.prepare(
       `SELECT id FROM rooms
-       WHERE id = ? AND status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?`,
+       WHERE id = ? AND status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM players WHERE room_id = rooms.id AND connected = 1
+         )`,
     ).get(id, cutoff);
     if (!eligible) return [];
 
@@ -113,7 +116,10 @@ export class RoomRepository {
       this.db.prepare(`DELETE FROM audit_events WHERE room_id = ?`).run(id);
       const result = this.db.prepare(
         `DELETE FROM rooms
-         WHERE id = ? AND status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?`,
+         WHERE id = ? AND status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM players WHERE room_id = rooms.id AND connected = 1
+           )`,
       ).run(id, cutoff);
       if (Number(result.changes) !== 1) {
         this.db.exec("ROLLBACK");
@@ -233,15 +239,16 @@ export class GameInstanceRepository {
     pluginId: string;
     roomId: string;
     seed: number;
+    settings?: Record<string, unknown>;
     now: number;
   }): GameInstanceRow {
     const id = newId("game");
     this.db
       .prepare(
-        `INSERT INTO game_instances (id, room_id, plugin_id, seed, phase, round_number, round_total, state_json, started_at)
-         VALUES (?, ?, ?, ?, 'SETUP', 0, 0, '{}', ?)`,
+        `INSERT INTO game_instances (id, room_id, plugin_id, seed, phase, round_number, round_total, state_json, settings_json, started_at)
+         VALUES (?, ?, ?, ?, 'SETUP', 0, 0, '{}', ?, ?)`,
       )
-      .run(id, opts.roomId, opts.pluginId, opts.seed, opts.now);
+      .run(id, opts.roomId, opts.pluginId, opts.seed, JSON.stringify(opts.settings ?? {}), opts.now);
     return this.byId(id)!;
   }
 

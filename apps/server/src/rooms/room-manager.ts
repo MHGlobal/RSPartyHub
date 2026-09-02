@@ -167,7 +167,9 @@ export class RoomManager {
       const mem: MemRoom = {
         id: row.id,
         code: row.code,
-        phase: row.current_game_id ? "lobby" : row.status,
+        // A runtime is attached below only after its persisted instance is
+        // validated. Until then, expose a conservative non-game phase.
+        phase: row.status === "results" ? "results" : "lobby",
         locked: !!row.locked,
         maxPlayers: row.max_players,
         reactionsMuted: false,
@@ -193,17 +195,29 @@ export class RoomManager {
           kicked: false,
           lastSeenAt: pr.last_seen_at,
         });
+        // No socket survives a process restart. Keep durable connectivity in
+        // sync with the in-memory reset so idle GC remains accurate.
+        if (pr.connected) this.playerRepo.update(pr.id, { connected: 0 });
       }
       this.rooms.set(mem.id, mem);
-      // restart persisted game instance so its state is not lost
+      // Restart an active game only from a valid, unfinished persisted
+      // instance. attachRuntime restores both serialised state and effective
+      // runtime settings; no game is ever exposed as a lobby with a live timer.
       const inst = row.current_game_id ? this.gameRepo.byId(row.current_game_id) : undefined;
       if (inst && !inst.ended_at && this.registry.get(inst.plugin_id)) {
         try {
           this.attachRuntime(mem, inst.plugin_id, inst.id);
+          mem.phase = "game";
+          if (row.status !== "game") this.roomRepo.update(mem.id, { status: "game" });
         } catch {
-          // corrupt instance: drop back to lobby rather than crash boot
+          // Corrupt state cannot safely run. End it and return to a usable
+          // lobby rather than crash boot or leave an orphan runtime pointer.
           this.gameRepo.update(inst.id, { ended_at: Date.now() });
+          this.roomRepo.update(mem.id, { status: "lobby", current_game_id: null });
         }
+      } else if (row.current_game_id) {
+        // Missing, ended, or unavailable plugins cannot be resumed safely.
+        this.roomRepo.update(mem.id, { status: "lobby", current_game_id: null });
       }
       n++;
     }
@@ -249,13 +263,16 @@ export class RoomManager {
     const cutoff = now - this.cfg.roomIdleTtlMs;
     const candidates = this.db.prepare(
       `SELECT id FROM rooms
-       WHERE status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?`,
+       WHERE status = 'lobby' AND current_game_id IS NULL AND updated_at <= ?
+         AND NOT EXISTS (
+           SELECT 1 FROM players WHERE room_id = rooms.id AND connected = 1
+         )`,
     ).all(cutoff) as Array<{ id: string }>;
     let swept = 0;
     for (const { id } of candidates) {
       const room = this.rooms.get(id);
       // Do not rely only on persisted state to protect live game runtimes.
-      if (room && (room.phase !== "lobby" || room.game)) continue;
+      if (room && (room.phase !== "lobby" || room.game || [...room.players.values()].some((p) => p.connected))) continue;
       const storageKeys = this.roomRepo.purgeIdleLobby(id, cutoff);
       if (storageKeys.length === 0 && this.roomRepo.byId(id)) continue;
       this.rooms.delete(id);

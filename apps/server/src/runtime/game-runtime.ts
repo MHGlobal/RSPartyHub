@@ -26,6 +26,7 @@ export interface RuntimeActionError extends Error {
 export class GameRuntime {
   private timer?: ReturnType<typeof setInterval>;
   private done = false;
+  private readonly settings: GameSettingsValues;
   instanceId: string;
 
   constructor(
@@ -54,11 +55,14 @@ export class GameRuntime {
       delete (restored as { __rng?: unknown }).__rng;
       this.rng = rng;
       this.state = restored;
+      this.settings = parseSettings(row.settings_json);
     } else {
+      this.settings = settingsProvider();
       const row = games.create({
         pluginId: plugin.manifest.id,
         roomId,
         seed,
+        settings: this.settings,
         now: Date.now(),
       });
       this.instanceId = row.id;
@@ -81,7 +85,7 @@ export class GameRuntime {
     return {
       roomId: this.roomId,
       players: this.playersProvider(),
-      settings: this.settingsProvider(),
+      settings: this.settings,
       rng: this.rng,
       clock: new RealClock(),
       announce: this.announce,
@@ -178,5 +182,17 @@ export class GameRuntime {
       round_total: this.state.roundTotal,
       state_json: JSON.stringify(serializable),
     });
+  }
+}
+
+function parseSettings(json: string): GameSettingsValues {
+  try {
+    const value: unknown = JSON.parse(json);
+    return value && typeof value === "object" && !Array.isArray(value)
+      ? value as GameSettingsValues
+      : {};
+  } catch {
+    // Older/corrupt rows can still resume with plugin defaults safely.
+    return {};
   }
 }

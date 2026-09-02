@@ -57,6 +57,8 @@ export interface GameInstanceRow {
   round_number: number;
   round_total: number;
   state_json: string;
+  /** Immutable effective settings used to create this game runtime. */
+  settings_json: string;
   started_at: number;
   ended_at: number | null;
   result_json: string | null;
@@ -245,6 +247,13 @@ const MIGRATIONS: { version: number; up: string }[] = [
     up: `
       CREATE INDEX IF NOT EXISTS idx_rooms_idle_lobby
         ON rooms(status, current_game_id, updated_at);
+    `,
+  },
+  {
+    // Active games must retain their effective settings across a process restart.
+    version: 5,
+    up: `
+      ALTER TABLE game_instances ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}';
     `,
   },
 ];
