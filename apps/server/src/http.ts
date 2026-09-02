@@ -3,6 +3,8 @@
  * admin overview. Static web app served from ./public (same origin — spec §5.1).
  */
 import path from "node:path";
+import { randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -34,6 +36,12 @@ export interface HttpDeps {
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const publicDir = path.join(__dirname, "..", "public");
+
+function contentSecurityPolicy(nonce?: string): string {
+  const scriptSource = nonce ? `'self' 'nonce-${nonce}'` : "'self'";
+  return `default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src ${scriptSource}; connect-src 'self' ws: wss:; frame-ancestors 'self'`;
+}
 
 export async function buildHttp(deps: HttpDeps) {
   const app = Fastify({ logger: false, bodyLimit: 12 * 1024 * 1024 });
@@ -46,17 +54,34 @@ export async function buildHttp(deps: HttpDeps) {
   const joinTokens = new Map<string, string>();
 
   app.register(fastifyStatic, {
-    root: path.join(__dirname, "..", "public"),
+    root: publicDir,
     prefix: "/",
     decorateReply: true,
   });
 
+  // The UI uses inline ES modules. Render each HTML response with a fresh CSP
+  // nonce instead of allowing arbitrary inline scripts globally.
+  const sendHtml = async (reply: import("fastify").FastifyReply, file: string) => {
+    const nonce = randomBytes(16).toString("base64");
+    const html = await readFile(path.join(publicDir, file), "utf8");
+    reply
+      .header("Content-Security-Policy", contentSecurityPolicy(nonce))
+      .type("text/html; charset=utf-8")
+      .send(html.replace(/<script type="module">/g, `<script type="module" nonce="${nonce}">`));
+  };
+
   // Public navigation uses extensionless LAN-friendly URLs while the static
-  // files retain their explicit names on disk.
-  app.get("/host", async (_req, reply) => reply.sendFile("host.html"));
-  app.get("/play", async (_req, reply) => reply.sendFile("play.html"));
-  app.get("/admin", async (_req, reply) => reply.sendFile("admin.html"));
-  app.get("/join/:roomCode", async (_req, reply) => reply.sendFile("index.html"));
+  // files retain their explicit names on disk. Serve every HTML entrypoint
+  // here so direct .html links receive the same per-response nonce.
+  for (const [url, file] of [
+    ["/", "index.html"], ["/index.html", "index.html"],
+    ["/host", "host.html"], ["/host.html", "host.html"],
+    ["/play", "play.html"], ["/play.html", "play.html"],
+    ["/admin", "admin.html"], ["/admin.html", "admin.html"],
+  ] as const) {
+    app.get(url, async (_req, reply) => sendHtml(reply, file));
+  }
+  app.get("/join/:roomCode", async (_req, reply) => sendHtml(reply, "index.html"));
 
   app.get("/healthz", async () => ({ ok: true }));
   app.get("/api/health", async () => ({ ok: true }));
@@ -145,10 +170,10 @@ export async function buildHttp(deps: HttpDeps) {
     reply.header("X-Frame-Options", "SAMEORIGIN");
     reply.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
     reply.header("X-Powered-By", "RS Party Hub");
-    // The browser UI currently contains same-origin inline ES modules. Permit
-    // those modules until they are moved to external files; all network and
-    // object/frame restrictions remain enforced.
-    reply.header("Content-Security-Policy", "default-src 'self'; base-uri 'self'; object-src 'none'; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; frame-ancestors 'self'");
+    // Non-HTML responses have no inline script to authorize.
+    if (!reply.hasHeader("Content-Security-Policy")) {
+      reply.header("Content-Security-Policy", contentSecurityPolicy());
+    }
     reply.header("Cache-Control", "no-store");
   });
 

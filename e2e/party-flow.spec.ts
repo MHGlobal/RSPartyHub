@@ -48,3 +48,11 @@ test("joining an unknown room gives browser UI feedback", async ({ browser }) =>
   await player.goto("/play?room=ZZZZ", { waitUntil: "domcontentloaded", timeout: 15_000 });
   await expect(player.getByRole("heading", { name: /Sala não encontrada — confirma o código\./ })).toBeVisible({ timeout: 15_000 });
 });
+
+test("join route pre-fills its room code and admin route serves its page", async ({ page }) => {
+  await page.goto("/join/abcz?t=example", { waitUntil: "domcontentloaded" });
+  await expect(page.locator("#room-code")).toHaveValue("ABCZ");
+
+  await page.goto("/admin", { waitUntil: "domcontentloaded" });
+  await expect(page.getByRole("heading", { name: "Autenticação" })).toBeVisible();
+});

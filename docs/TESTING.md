@@ -17,6 +17,19 @@ pnpm test:e2e
 `pnpm verify` combina typecheck e Vitest; execute `pnpm test:e2e` separadamente
 para a validação do browser.
 
+## Instalação do Chromium
+
+Depois de `pnpm install`, instale o browser gerido pela versão bloqueada de
+Playwright com o comando abaixo (inclui as dependências de sistema em Debian/Ubuntu):
+
+```bash
+pnpm exec playwright install --with-deps chromium
+```
+
+Em CI, o workflow executa o mesmo comando antes de `pnpm test:e2e`. Não assuma
+que um Chromium instalado globalmente é compatível com a versão de Playwright do
+repositório.
+
 ## Cobertura E2E atual
 
 `e2e/party-flow.spec.ts` corre somente em Chromium e cobre:
@@ -25,6 +38,8 @@ para a validação do browser.
 - entrada de jogador a partir de um contexto isolado;
 - feedback para uma sala inexistente;
 - refresh do jogador com retoma da identidade, sem criar duplicado.
+- prefill de código por `/join/:roomCode` e entrega da página `/admin`.
 
-O servidor E2E usa `RS_PARTY_HOME=.rs-party-e2e`, porta `3211` e mDNS desligado;
-os seus dados são descartáveis e não são usados pela execução normal.
+O servidor E2E usa `RS_PARTY_HOME=.rs-party-e2e`, porta `3211` e mDNS desligado.
+O setup e teardown globais removem esse diretório antes e depois de cada execução,
+para que salas e SQLite não sejam reutilizados entre execuções.

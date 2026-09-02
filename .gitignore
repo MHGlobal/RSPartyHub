@@ -15,6 +15,7 @@ test-results/
 
 # runtime data (DB, uploads, logs) — never commit
 .rs-party-home/
+.rs-party-e2e/
 .opencode-*.sh
 .opencode-*.pid
 .opencode-*.log

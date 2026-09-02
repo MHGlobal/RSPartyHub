@@ -100,6 +100,27 @@ describe("security hardening", () => {
     }
   });
 
+  it("uses a fresh CSP nonce for each HTML response inline module", async () => {
+    const home = tmpHome("rsparty-sec-csp-nonce-");
+    const srv = await startServer({ dbFile: join(home, "data.sqlite"), port: 0 });
+    try {
+      const base = srv.address!;
+      const [first, second] = await Promise.all([fetch(`${base}/`), fetch(`${base}/`)]);
+      const firstHtml = await first.text();
+      const firstCsp = first.headers.get("content-security-policy") ?? "";
+      const secondCsp = second.headers.get("content-security-policy") ?? "";
+      const nonce = firstHtml.match(/<script type="module" nonce="([^"]+)">/)?.[1];
+
+      expect(nonce).toBeTruthy();
+      expect(firstCsp).toContain(`script-src 'self' 'nonce-${nonce}'`);
+      expect(firstCsp).not.toContain("script-src 'self' 'unsafe-inline'");
+      expect(secondCsp).not.toBe(firstCsp);
+    } finally {
+      await srv.close();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   it("requires admin token for /api/admin/* when token set", async () => {
     const home = tmpHome("rsparty-sec-admin-");
     const prev = process.env.RS_PARTY_ADMIN_TOKEN;
