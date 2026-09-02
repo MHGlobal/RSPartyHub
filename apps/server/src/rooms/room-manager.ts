@@ -58,7 +58,11 @@ export interface MemPlayer {
 
 interface MemGame {
   runtime: GameRuntime;
-  mixQueue: string[];
+}
+
+interface MemPartyMix {
+  /** Remaining host-selected games, in their intended order. */
+  queue: string[];
 }
 
 export interface MemRoom {
@@ -74,6 +78,7 @@ export interface MemRoom {
   players: Map<string, MemPlayer>;
   announcements: Announcement[];
   game?: MemGame;
+  partyMix?: MemPartyMix;
   results?: ResultsPayload & { gameId: string };
 }
 
@@ -89,6 +94,8 @@ function joinErr(code: keyof typeof ErrorCodes, detail?: string): JoinError {
 
 export class RoomManager {
   private rooms = new Map<string, MemRoom>();
+  /** Kept outside snapshots so a cancelled mix cannot retain a live timer. */
+  private mixTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Push channel injected by the gateway so runtime ticks reach clients. */
   broadcast: (roomId: string) => void = () => {};
@@ -219,6 +226,7 @@ export class RoomManager {
   }
 
   closeRoom(room: MemRoom): void {
+    this.clearPartyMix(room);
     room.game?.runtime.finishEarly();
     room.game = undefined;
     room.phase = "closed";
@@ -229,7 +237,10 @@ export class RoomManager {
 
   /** Stop all runtime timers without altering durable room/game state. */
   dispose(): void {
-    for (const room of this.rooms.values()) room.game?.runtime.dispose();
+    for (const room of this.rooms.values()) {
+      room.game?.runtime.dispose();
+      this.clearPartyMix(room);
+    }
   }
 
   /** Explicit idle sweep, also usable deterministically by tests. */
@@ -443,6 +454,7 @@ export class RoomManager {
         // future game through a stale onFinished callback (review H1)
         room.game?.runtime.dispose();
         room.game = undefined;
+        this.clearPartyMix(room);
         room.results = undefined;
         room.phase = "lobby";
         for (const p of room.players.values()) {
@@ -478,7 +490,7 @@ export class RoomManager {
 
   /* ---------------- game start / party mix ---------------- */
 
-  startGame(roomId: string, hostPlayerId: string, pluginId: string, settings?: Record<string, unknown>): void {
+  startGame(roomId: string, hostPlayerId: string, pluginId: string, settings?: Record<string, unknown>, fromPartyMix = false): void {
     const room = this.rooms.get(roomId);
     const host = room?.players.get(hostPlayerId);
     if (!room || !host || host.role !== "host") throw joinErr("NOT_HOST");
@@ -490,6 +502,7 @@ export class RoomManager {
     const plugin = this.registry.get(pluginId);
     if (!plugin) throw joinErr("GAME_NOT_FOUND");
     if (activeCount < plugin.manifest.minPlayers) throw joinErr("MIN_PLAYERS");
+    if (!fromPartyMix) this.clearPartyMix(room);
 
     // apply defaults from manifest settings schema
     const merged: GameSettingsValues = {};
@@ -540,7 +553,7 @@ export class RoomManager {
       },
       existingInstanceId,
     );
-    room.game = { runtime, mixQueue: [] };
+    room.game = { runtime };
     this.db
       .prepare(`UPDATE rooms SET current_game_id = ? WHERE id = ?`)
       .run(runtime.instanceId, room.id);
@@ -551,8 +564,12 @@ export class RoomManager {
     if (!game) return;
     const result = game.runtime.score();
 
-    // apply cumulative scores
-    for (const row of result.roundScores) {
+    // Party Mix uses rank-based Party Points so a long/high-score game cannot
+    // dominate a short one. Standalone games retain their native score deltas.
+    const scoreDeltas = room.partyMix
+      ? normalizedPartyPoints(result.roundScores)
+      : result.roundScores;
+    for (const row of scoreDeltas) {
       const p = room.players.get(row.playerId);
       if (!p) continue;
       p.score += row.delta;
@@ -576,24 +593,33 @@ export class RoomManager {
     // persist current_game_id cleared so restart boots to lobby/results
     this.db.prepare(`UPDATE rooms SET current_game_id = NULL WHERE id = ?`).run(room.id);
 
-    // Party Mix auto-chain (spec P4)
-    if (game.mixQueue.length > 0) {
-      const next = game.mixQueue.shift()!;
-      setTimeout(() => {
+    // Party Mix auto-chain. Store the timer centrally so return-to-lobby,
+    // close and process disposal cancel it deterministically.
+    const partyMix = room.partyMix;
+    if (partyMix?.queue.length) {
+      const next = partyMix.queue.shift()!;
+      const timer = setTimeout(() => {
+        this.mixTimers.delete(room.id);
         try {
-          this.startMixNext(room.id, next, game.mixQueue);
+          this.startMixNext(room.id, next);
         } catch {
-          // queue invalid (e.g., not enough players): stay in results
+          // A changing room can make the next game incompatible. End the mix
+          // cleanly at the authoritative results screen rather than skipping.
+          this.clearPartyMix(room);
         }
       }, this.cfg.resultsViewMs);
+      this.mixTimers.set(room.id, timer);
+    } else if (partyMix) {
+      // The final scoreboard remains visible, but no obsolete mix state/timer
+      // survives to affect a later manual game or lobby.
+      this.clearPartyMix(room);
     }
   }
 
-  private startMixNext(roomId: string, pluginId: string, remainingQueue: string[]): void {
+  private startMixNext(roomId: string, pluginId: string): void {
     const room = this.rooms.get(roomId);
     if (!room || room.phase !== "results") return;
-    this.startGame(roomId, this.hostOf(room), pluginId);
-    if (room.game) room.game.mixQueue = remainingQueue;
+    this.startGame(roomId, this.hostOf(room), pluginId, undefined, true);
   }
 
   hostOf(room: MemRoom): string {
@@ -602,19 +628,29 @@ export class RoomManager {
     return host.id;
   }
 
-  startPartyMix(roomId: string, hostPlayerId: string, count: number): void {
+  startPartyMix(roomId: string, hostPlayerId: string, gameIds: string[]): void {
     const room = this.rooms.get(roomId);
     const host = room?.players.get(hostPlayerId);
     if (!room || !host || host.role !== "host") throw joinErr("NOT_HOST");
-    const pool = this.registry
-      .list()
-      .filter((m) => m.priority === "P0")
-      .map((m) => m.id);
-    if (pool.length === 0) throw joinErr("GAME_NOT_FOUND");
-    const order = shuffleDeterministic(pool, Date.now() >>> 0).slice(0, Math.max(1, count));
-    const first = order[0]!;
-    this.startGame(roomId, hostPlayerId, first);
-    if (room.game) room.game.mixQueue = order.slice(1);
+    if (room.phase !== "lobby" && room.phase !== "results") throw joinErr("BAD_PHASE");
+    if (gameIds.length === 0) throw joinErr("MIX_EMPTY");
+    if (new Set(gameIds).size !== gameIds.length) throw joinErr("MIX_DUPLICATE_GAME");
+    const activeCount = [...room.players.values()].filter((p) => !p.kicked && p.role === "player").length;
+    for (const gameId of gameIds) {
+      const plugin = this.registry.get(gameId);
+      if (!plugin || plugin.manifest.priority !== "P0" || activeCount < plugin.manifest.minPlayers || activeCount > plugin.manifest.maxPlayers) {
+        throw joinErr("MIX_INCOMPATIBLE_GAME");
+      }
+    }
+    room.partyMix = { queue: gameIds.slice(1) };
+    this.startGame(roomId, hostPlayerId, gameIds[0]!, undefined, true);
+  }
+
+  private clearPartyMix(room: MemRoom): void {
+    const timer = this.mixTimers.get(room.id);
+    if (timer) clearTimeout(timer);
+    this.mixTimers.delete(room.id);
+    room.partyMix = undefined;
   }
 
   /**
@@ -679,6 +715,7 @@ export class RoomManager {
       stateVersion: room.stateVersion,
       players: playerInfos(room),
       game: this.publicGameView(room),
+      partyMix: room.partyMix ? { remainingGames: room.partyMix.queue.length } : undefined,
       announcements: room.announcements.slice(-5),
     };
   }
@@ -782,21 +819,17 @@ function rankScores(room: MemRoom, titles?: Record<string, string>): ScoreRow[] 
   });
 }
 
-function shuffleDeterministic<T>(arr: T[], seed: number): T[] {
-  const out = [...arr];
-  let s = seed >>> 0 || 1;
-  const rnd = () => {
-    s = (s + 0x6d2b79f5) >>> 0;
-    let t = s;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(rnd() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
+/** Convert a game's native result into deterministic, bounded Party Points. */
+export function normalizedPartyPoints(rows: Array<{ playerId: string; delta: number }>): Array<{ playerId: string; delta: number }> {
+  const sorted = [...rows].sort((a, b) => b.delta - a.delta || a.playerId.localeCompare(b.playerId));
+  let previous: number | undefined;
+  let rank = 0;
+  return sorted.map((row, index) => {
+    if (row.delta !== previous) rank = index + 1;
+    previous = row.delta;
+    const points = rank === 1 ? 100 : rank === 2 ? 75 : rank === 3 ? 60 : Math.max(10, Math.round(60 * (sorted.length - rank) / Math.max(1, sorted.length - 3)));
+    return { playerId: row.playerId, delta: points };
+  });
 }
 
 function SeededRandomSeed(): number {

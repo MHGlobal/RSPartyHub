@@ -15,6 +15,9 @@ export const ErrorCodes = {
   INVALID_PAYLOAD: "INVALID_PAYLOAD",
   GAME_NOT_FOUND: "GAME_NOT_FOUND",
   MIN_PLAYERS: "MIN_PLAYERS",
+  MIX_EMPTY: "MIX_EMPTY",
+  MIX_DUPLICATE_GAME: "MIX_DUPLICATE_GAME",
+  MIX_INCOMPATIBLE_GAME: "MIX_INCOMPATIBLE_GAME",
   DEADLINE_PASSED: "DEADLINE_PASSED",
   INTERNAL: "INTERNAL",
 } as const;
@@ -53,6 +56,12 @@ export function errorMessage(code: ErrorCode): string {
       return "Jogo desconhecido.";
     case "MIN_PLAYERS":
       return "Jogadores insuficientes para este jogo.";
+    case "MIX_EMPTY":
+      return "Escolhe pelo menos um jogo para o Party Mix.";
+    case "MIX_DUPLICATE_GAME":
+      return "Um jogo só pode aparecer uma vez no Party Mix.";
+    case "MIX_INCOMPATIBLE_GAME":
+      return "Um dos jogos escolhidos não é compatível com esta sala.";
     case "DEADLINE_PASSED":
       return "Tempo esgotado.";
     case "INTERNAL":

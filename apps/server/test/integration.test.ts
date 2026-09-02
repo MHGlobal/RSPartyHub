@@ -184,6 +184,39 @@ describe("reconnect & resume (spec §10.5)", () => {
   }, 20_000);
 });
 
+describe("Party Mix lifecycle", () => {
+  it("validates the ordered mix and preserves it when a player reconnects", async () => {
+    const host = await createRoomAsHost();
+    const p1 = await joinPlayer(host.roomCode, 51);
+    const p2 = await joinPlayer(host.roomCode, 52);
+
+    const empty = await emitAck(host.socket, "party-mix:start", { gameIds: [] });
+    expect(empty).toMatchObject({ accepted: false, errorCode: "MIX_EMPTY" });
+    const duplicate = await emitAck(host.socket, "party-mix:start", { gameIds: ["quiz-rush", "quiz-rush"] });
+    expect(duplicate).toMatchObject({ accepted: false, errorCode: "MIX_DUPLICATE_GAME" });
+    const incompatible = await emitAck(host.socket, "party-mix:start", { gameIds: ["nope"] });
+    expect(incompatible).toMatchObject({ accepted: false, errorCode: "MIX_INCOMPATIBLE_GAME" });
+
+    const started = await emitAck(host.socket, "party-mix:start", { gameIds: ["quiz-rush", "charades"] });
+    expect(started.accepted).toBe(true);
+    p1.socket.disconnect();
+    const resumed = await connect(env.url);
+    const resume = await emitAck(resumed, "room:join", {
+      roomCode: host.roomCode, playerId: p1.playerId, resumeToken: p1.resumeToken,
+    });
+    expect(resume.accepted).toBe(true);
+    const snapshot = await nextSnapshot(resumed);
+    expect(snapshot).toMatchObject({
+      phase: "game",
+      partyMix: { remainingGames: 1 },
+      you: { id: p1.playerId, connected: true },
+    });
+    host.socket.disconnect();
+    p2.socket.disconnect();
+    resumed.disconnect();
+  }, 30_000);
+});
+
 describe("idempotency & rate limits (spec §10.3/§10.8)", () => {
   it("same eventId is accepted once without double effect", async () => {
     const host = await createRoomAsHost();

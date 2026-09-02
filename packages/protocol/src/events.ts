@@ -40,6 +40,7 @@ export interface RoomSnapshot {
   stateVersion: number;
   players: PlayerPublicInfo[];
   game?: GamePublicState;
+  partyMix?: { remainingGames: number };
   results?: ResultsPayload;
   announcements?: Announcement[];
 }
@@ -86,6 +87,12 @@ export const GameStartSchema = z.object({
   gameId: z.string().min(1),
   settings: z.record(z.union([z.number(), z.boolean(), z.string()])).optional(),
 });
+
+/** Ordered host-selected Party Mix. The server still validates every game. */
+export const PartyMixStartSchema = z.object({
+  gameIds: z.array(z.string().min(1)).max(10),
+});
+export type PartyMixStart = z.infer<typeof PartyMixStartSchema>;
 
 export const GameActionSchema = z.object({
   type: z.string().min(1).max(48),

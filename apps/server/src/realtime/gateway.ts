@@ -12,6 +12,7 @@ import {
   HostControlSchema,
   IDEMPOTENCY_WINDOW_MS,
   JoinPlayerInputSchema,
+  PartyMixStartSchema,
   RATE_LIMITS,
   ReactionKindSchema,
 } from "@rs-party/protocol";
@@ -114,9 +115,14 @@ export class Gateway {
       socket.on("party-mix:start", (raw, ack) => {
         this.guarded(socket, ack, () => {
           const s = this.session(socket)!;
-          const count = Math.min(Math.max(Number(raw?.count ?? 3), 1), 10);
+          let mix;
           try {
-            this.rooms.startPartyMix(s.roomId, s.playerId, count);
+            mix = PartyMixStartSchema.parse(raw);
+          } catch {
+            return { accepted: false, errorCode: "INVALID_PAYLOAD" };
+          }
+          try {
+            this.rooms.startPartyMix(s.roomId, s.playerId, mix.gameIds);
             this.scheduleBroadcast(s.roomId);
             return { accepted: true };
           } catch (err) {

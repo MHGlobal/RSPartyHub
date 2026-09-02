@@ -1,11 +1,11 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GameRegistry } from "@rs-party/game-engine";
 import { ChatRepository, Database, MediaRepository } from "@rs-party/persistence";
 import type { ServerConfig } from "../src/config.js";
-import { RoomManager } from "../src/rooms/room-manager.js";
+import { normalizedPartyPoints, RoomManager } from "../src/rooms/room-manager.js";
 
 const homes: string[] = [];
 
@@ -33,6 +33,75 @@ function setup(ttl = 1_000) {
 }
 
 describe("RoomManager durable lobby lifecycle", () => {
+  it("normalizes Party Mix results into deterministic bounded Party Points", () => {
+    expect(normalizedPartyPoints([
+      { playerId: "p3", delta: 10 },
+      { playerId: "p1", delta: 40 },
+      { playerId: "p2", delta: 20 },
+      { playerId: "p4", delta: 0 },
+    ])).toEqual([
+      { playerId: "p1", delta: 100 },
+      { playerId: "p2", delta: 75 },
+      { playerId: "p3", delta: 60 },
+      { playerId: "p4", delta: 10 },
+    ]);
+  });
+
+  it("chains the selected next game after results and accumulates Party Points", () => {
+    vi.useFakeTimers();
+    const { cfg, registry } = setup();
+    const db = new Database(cfg.dbFile);
+    const rooms = new RoomManager(db, registry, cfg);
+    const { room, result: host } = rooms.createRoomAsHost(undefined, { nickname: "Host", avatar: { icon: "🎤", bg: "#123456" } });
+    const p1 = rooms.join(room.code, { nickname: "One", avatar: { icon: "1", bg: "#111111" } });
+    const p2 = rooms.join(room.code, { nickname: "Two", avatar: { icon: "2", bg: "#222222" } });
+    room.phase = "game";
+    room.partyMix = { queue: ["next-game"] };
+    room.game = { runtime: {
+      plugin: { manifest: { id: "first-game", name: "First" } },
+      score: () => ({ roundScores: [{ playerId: p1.playerId, delta: 9 }, { playerId: p2.playerId, delta: 3 }], awards: [] }),
+      dispose: () => {},
+    } } as never;
+    const next = vi.spyOn(rooms as unknown as { startMixNext(roomId: string, gameId: string): void }, "startMixNext").mockImplementation(() => {});
+
+    rooms.onGameFinished(room);
+    expect(room.phase).toBe("results");
+    expect(room.players.get(p1.playerId)?.score).toBe(100);
+    expect(room.players.get(p2.playerId)?.score).toBe(75);
+    vi.advanceTimersByTime(cfg.resultsViewMs);
+    expect(next).toHaveBeenCalledWith(room.id, "next-game");
+    rooms.dispose();
+    db.close();
+    vi.useRealTimers();
+    void host;
+  });
+
+  it("return-to-lobby cancels a pending Party Mix transition", () => {
+    vi.useFakeTimers();
+    const { cfg, registry } = setup();
+    const db = new Database(cfg.dbFile);
+    const rooms = new RoomManager(db, registry, cfg);
+    const { room, result: host } = rooms.createRoomAsHost(undefined, { nickname: "Host", avatar: { icon: "🎤", bg: "#123456" } });
+    const p1 = rooms.join(room.code, { nickname: "One", avatar: { icon: "1", bg: "#111111" } });
+    room.phase = "game";
+    room.partyMix = { queue: ["next-game"] };
+    room.game = { runtime: {
+      plugin: { manifest: { id: "first-game", name: "First" } },
+      score: () => ({ roundScores: [{ playerId: p1.playerId, delta: 1 }], awards: [] }),
+      dispose: () => {},
+    } } as never;
+    const next = vi.spyOn(rooms as unknown as { startMixNext(roomId: string, gameId: string): void }, "startMixNext").mockImplementation(() => {});
+
+    rooms.onGameFinished(room);
+    rooms.hostControl(room.id, host.playerId, { op: "return-to-lobby" });
+    vi.advanceTimersByTime(cfg.resultsViewMs);
+    expect(room).toMatchObject({ phase: "lobby", partyMix: undefined, game: undefined, results: undefined });
+    expect(next).not.toHaveBeenCalled();
+    rooms.dispose();
+    db.close();
+    vi.useRealTimers();
+  });
+
   it("rehydrates a lobby without a game including settings, lock, players, and ready state", () => {
     const { cfg, registry } = setup();
     const firstDb = new Database(cfg.dbFile);
