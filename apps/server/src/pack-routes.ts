@@ -6,10 +6,12 @@
 import type { FastifyInstance } from "fastify";
 import type { PackLibrary } from "@rs-party/content";
 import { importPackString, validatePack, type LoadedPack } from "@rs-party/content";
+import { createHmac } from "node:crypto";
 
 export interface PackRoutesDeps {
   packs: PackLibrary;
   adminToken?: string;
+  adminSessionSecret?: string;
 }
 
 function packSummary(l: LoadedPack) {
@@ -43,6 +45,32 @@ function importHandler(deps: PackRoutesDeps, body: { json?: string; pack?: unkno
   return { status: 200 as const, body: { ok: true, pack: packSummary(deps.packs.byPackId(result.pack.packId)!) } };
 }
 
+// Check admin auth: session cookie first, then x-admin-token fallback
+function checkAdminAuth(req: import("fastify").FastifyRequest, deps: PackRoutesDeps): boolean {
+  // Parse admin-session from cookie header
+  const cookieHeader = req.headers["cookie"];
+  let sessionCookie: string | undefined;
+  if (cookieHeader) {
+    const parts = cookieHeader.split(";").map(p => p.trim());
+    for (const part of parts) {
+      if (part.startsWith("admin-session=")) {
+        sessionCookie = part.split("=")[1];
+        break;
+      }
+    }
+  }
+  // 1) Check session cookie first
+  if (deps.adminSessionSecret && sessionCookie) {
+    const hmac = createHmac("sha256", deps.adminSessionSecret).update(sessionCookie).digest();
+    const b64 = hmac.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+    if (b64 === (sessionCookie?.split(".")[1] ?? "")) return true;
+  }
+  // 2) Fall back to header token (backward-compatible automation)
+  const header = req.headers["x-admin-token"];
+  if (!deps.adminToken || header !== deps.adminToken) return false;
+  return true;
+}
+
 export function registerPackRoutes(app: FastifyInstance, deps: PackRoutesDeps): void {
   const listHandler = async () => ({ packs: deps.packs.list().map(packSummary) });
   // canonical (spec §180.9) + legacy alias + v1 alias
@@ -52,7 +80,7 @@ export function registerPackRoutes(app: FastifyInstance, deps: PackRoutesDeps): 
   app.get("/api/v1/content/packs", listHandler);
 
   const importRoute = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
-    if (!deps.adminToken || req.headers["x-admin-token"] !== deps.adminToken) {
+    if (!checkAdminAuth(req, deps)) {
       reply.code(401);
       return { error: "UNAUTHORIZED" };
     }
@@ -80,7 +108,7 @@ export function registerPackRoutes(app: FastifyInstance, deps: PackRoutesDeps): 
 
   // enable/disable stubs (spec §180.11-12) — pack library is file-based, enable is implicit on import
   const toggleHandler = async (req: import("fastify").FastifyRequest, reply: import("fastify").FastifyReply) => {
-    if (!deps.adminToken || req.headers["x-admin-token"] !== deps.adminToken) {
+    if (!checkAdminAuth(req, deps)) {
       reply.code(401);
       return { error: "UNAUTHORIZED" };
     }

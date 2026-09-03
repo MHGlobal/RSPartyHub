@@ -10,31 +10,94 @@
   <nav class="topbar">
     <div class="brand">RS <span>Party Hub</span> — Admin</div>
     <div class="conn-badge ok">local</div>
+    <div class="admin-area" id="admin-area">
+      <!-- Login form or session status will be injected here by JS -->
+    </div>
   </nav>
   <main class="wrap">
-    <section class="card">
-      <h2>Autenticação</h2>
-      <div class="field">
-        <label class="lbl" for="token">Token de administrador (RS_PARTY_ADMIN_TOKEN)</label>
-        <input id="token" class="input" type="password" placeholder="token" />
-      </div>
-      <button class="btn primary" id="btn-load">Carregar painel</button>
+    <section class="card" id="admin-panel">
+      <!-- Panel content injected by JS -->
     </section>
-    <div id="panel"></div>
   </main>
 
   <script type="module">
     import { el, h } from "/js/client.js";
-    const panel = el("panel");
+    const panel = el("admin-panel");
+    const adminArea = el("admin-area");
 
-    el("btn-load").addEventListener("click", load);
-    el("token").addEventListener("keydown", (e) => e.key === "Enter" && load());
+    let loggedIn = false;
+
+    // Check for existing session on load
+    async function checkSession() {
+      const res = await fetch("/api/admin/overview", { credentials: "include" });
+      if (res.ok) {
+        loggedIn = true;
+        renderLoggedIn();
+        load();
+      } else {
+        loggedIn = false;
+        renderLogin();
+      }
+    }
+
+    function renderLogin() {
+      adminArea.innerHTML = `
+        <div class="field">
+          <label class="lbl" for="pin">PIN de administrador</label>
+          <input id="pin" class="input" type="password" placeholder="4 dígitos" />
+        </div>
+        <button class="btn primary" id="btn-login">Entrar</button>
+        <div id="login-error" class="hint" style="margin-top:8px; color:var(--err);"></div>
+      `;
+      el("btn-login").addEventListener("click", login);
+      el("pin").addEventListener("keydown", (e) => e.key === "Enter" && login());
+    }
+
+    function renderLoggedIn() {
+      adminArea.innerHTML = `
+        <div class="field">
+          <span class="lbl">Logado como admin</span>
+        </div>
+        <button class="btn dangerous" id="btn-logout">Logout</button>
+        <span class="hint" style="margin-left:12px;">(x-token ainda funciona para automação)</span>
+      `;
+      el("btn-logout").addEventListener("click", logout);
+      // Re-render panel after login
+      load();
+    }
+
+    async function login() {
+      const pin = el("pin").value.trim();
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ pin })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        renderLoggedIn();
+      } else {
+        el("login-error").textContent = data.error || "Login failed";
+      }
+    }
+
+    async function logout() {
+      await fetch("/api/admin/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      renderLogin();
+      panel.innerHTML = "";
+      loggedIn = false;
+    }
 
     async function load() {
-      const token = el("token").value.trim();
-      const res = await fetch("/api/admin/overview", { headers: { "x-admin-token": token } });
+      if (!loggedIn) return;
+      const res = await fetch("/api/admin/overview", { credentials: "include" });
       if (!res.ok) {
-        panel.innerHTML = `<section class="card"><h2 style="color:var(--err)">Token inválido</h2></section>`;
+        // Session may have expired, re-show login
+        renderLogin();
         return;
       }
       const data = await res.json();
@@ -59,7 +122,7 @@
                 h("td", {}, `${r.players} jogadores`),
                 h("td", {}, r.currentGame ?? "—"),
                 r.locked ? h("td", {}, "🔒") : h("td"))))
-          : h("p", { class: "waiting-note" }, "Nenhuma sala ativa.")));
+          : h("p", { class: "waiting-note" }, "Nenhuma sala ativa."));
 
       const audit = data.recentAudit ?? [];
       panel.append(h("section", { class: "card" },
@@ -68,8 +131,10 @@
           audit.slice(0, 20).map(a => h("tr", {},
             h("td", { class: "rank" }, new Date(a.at).toLocaleTimeString()),
             h("td", {}, a.event_type),
-            h("td", { class: "p-meta" }, a.category))))));
+            h("td", { class: "p-meta" }, a.category)))));
     }
+
+    checkSession();
   </script>
 </body>
 </html>

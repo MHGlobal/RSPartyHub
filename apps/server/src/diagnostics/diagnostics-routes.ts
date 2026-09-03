@@ -13,6 +13,7 @@ import { backup } from "node:sqlite";
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, statfsSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
+import { createHmac } from "node:crypto";
 
 export interface DiagDeps {
   cfg: ServerConfig;
@@ -104,8 +105,29 @@ function createBackupDestination(homeDir: string): { directory: string; filename
 export function registerDiagnosticsRoutes(app: FastifyInstance, deps: DiagDeps): void {
   const serializeBackup = createBackupSerializer();
   const requireAdmin = (req: import("fastify").FastifyRequest): boolean => {
-    return !!deps.adminToken && req.headers["x-admin-token"] === deps.adminToken;
-  };
+  // Parse admin-session from cookie header
+  const cookieHeader = req.headers["cookie"];
+  let sessionCookie: string | undefined;
+  if (cookieHeader) {
+    const parts = cookieHeader.split(";").map(p => p.trim());
+    for (const part of parts) {
+      if (part.startsWith("admin-session=")) {
+        sessionCookie = part.split("=")[1];
+        break;
+      }
+    }
+  }
+  // 1) Check session cookie first
+  if (deps.cfg.adminSessionSecret) {
+    const hmac = createHmac("sha256", deps.cfg.adminSessionSecret).update(sessionCookie ?? "").digest();
+    const b64 = hmac.toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
+    if (b64 === (sessionCookie?.split(".")[1] ?? "")) return true;
+  }
+  // 2) Fall back to header token (backward-compatible automation)
+  const header = req.headers["x-admin-token"];
+  if (!!deps.adminToken && header === deps.adminToken) return true;
+  return false;
+};
 
   app.get("/api/admin/diagnostics", async (req, reply) => {
     if (!requireAdmin(req)) { reply.code(401); return { error:"UNAUTHORIZED" }; }

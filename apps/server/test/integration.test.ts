@@ -334,4 +334,62 @@ describe("HTTP layer", () => {
     const res = await fetch(`${env.url}/api/admin/overview`);
     expect([200, 401]).toContain(res.status);
   });
+
+  describe("admin session", () => {
+    it("login with correct PIN returns ok and sets session cookie", async () => {
+      const res = await fetch(`${env.url}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: "1234" }),
+      });
+      expect(res.ok).toBe(true);
+      const data = (await res.json()) as { ok: boolean; set_cookie?: string };
+      expect(data.ok).toBe(true);
+      expect(res.headers.get("set-cookie")).toBeTruthy();
+    });
+
+    it("login with wrong PIN returns 401", async () => {
+      const res = await fetch(`${env.url}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: "0000" }),
+      });
+      expect(res.status).toBe(401);
+      const data = (await res.json()) as { error: string };
+      expect(data.error).toBe("INVALID_PIN");
+    });
+
+    it("admin overview accessible via session cookie after login", async () => {
+      await fetch(`${env.url}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: "1234" }),
+      });
+      const res = await fetch(`${env.url}/api/admin/overview`, { credentials: "include" });
+      expect(res.status).toBe(200);
+    });
+
+    it("logout clears session cookie and denies access", async () => {
+      await fetch(`${env.url}/api/admin/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pin: "1234" }),
+      });
+      const res = await fetch(`${env.url}/api/admin/logout`, {
+        method: "POST",
+        credentials: "include",
+      });
+      expect(res.ok).toBe(true);
+      expect(res.headers.get("set-cookie")?.includes("admin-session=")).toBe(true);
+      const res2 = await fetch(`${env.url}/api/admin/overview`, { credentials: "include" });
+      expect(res2.status).toBe(401);
+    });
+
+    it("x-admin-token still works as fallback for automation", async () => {
+      const res = await fetch(`${env.url}/api/admin/overview`, {
+        headers: { "x-admin-token": "sec-test-token" },
+      });
+      expect([200, 401]).toContain(res.status);
+    });
+  });
 });

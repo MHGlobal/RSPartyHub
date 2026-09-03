@@ -2,8 +2,9 @@
  * Server configuration + RS_PARTY_HOME directory layout (spec §8.3).
  * Rule: library/ is never deleted by the app; temp/ is TTL-cleanable.
  */
-import { mkdirSync, readdirSync, statSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash, randomBytes } from "node:crypto";
 
 export interface ServerConfig {
   port: number;
@@ -11,6 +12,7 @@ export interface ServerConfig {
   homeDir: string;
   dbFile: string;
   adminToken?: string;
+  adminSessionSecret?: string;
   maxPlayersDefault: number;
   resultsViewMs: number;
   disconnectGraceMs: number;
@@ -23,6 +25,8 @@ export interface ServerConfig {
   /** Enable the optional, best-effort `_rsparty._tcp` mDNS announcement. */
   mdnsEnabled: boolean;
   logLevel: string;
+  /** Admin PIN hash (hex) for session-based authentication. Set on first boot if absent. */
+  adminPinHash?: string;
 }
 
 function intEnv(name: string, fallback: number): number {
@@ -48,6 +52,30 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
   if (corsAllowedOrigins?.some((origin) => origin.includes("*"))) {
     throw new Error("CORS wildcard origins are not allowed");
   }
+  // Bootstrap admin credentials on first start if no token is configured
+  let adminPinHash = env.RS_PARTY_ADMIN_PIN_HASH as string | undefined;
+  let adminSessionSecret = env.RS_PARTY_ADMIN_SESSION_SECRET as string | undefined;
+
+  if (!adminSessionSecret) {
+    // Generate a random session secret on first start
+    adminSessionSecret = randomBytes(32).toString("hex");
+  }
+
+  if (!adminPinHash) {
+    // Try to load existing credentials, otherwise generate a default PIN hash
+    const credsPath = join(homeDir, "config", "admin-credentials.json");
+    if (existsSync(credsPath)) {
+      const creds = JSON.parse(readFileSync(credsPath, "utf8"));
+      adminPinHash = creds.pinHash;
+    } else {
+      // Default: PIN "1234" hashed with SHA-256 for first-time bootstrap
+      adminPinHash = createHash("sha256").update("1234").digest("hex");
+      // Persist so future starts reuse the same default
+      mkdirSync(join(homeDir, "config"), { recursive: true });
+      writeFileSync(credsPath, JSON.stringify({ pinHash: adminPinHash }));
+    }
+  }
+
   return {
     port: intEnv("RS_PARTY_PORT", 3210),
     host: env.RS_PARTY_BIND ?? "0.0.0.0",
@@ -55,6 +83,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     dbFile:
       env.RS_PARTY_DB ?? join(homeDir, "data", "rsparty.sqlite"),
     adminToken: env.RS_PARTY_ADMIN_TOKEN,
+    adminSessionSecret,
+    adminPinHash,
     maxPlayersDefault: intEnv("RS_PARTY_MAX_PLAYERS", 12),
     resultsViewMs: intEnv("RS_PARTY_RESULTS_MS", 8000),
     disconnectGraceMs: intEnv("RS_PARTY_DISCONNECT_GRACE_MS", 60_000),
